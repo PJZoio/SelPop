@@ -1,1 +1,128 @@
+# =====================================================================
+# Estudo: DIAGNÓSTICO DE DRC (validação do miniNIR em soro humano real)
+# Pergunta: o espetro distingue doentes com DRC de doentes sem doença renal?
+# Casos: doentes com DRC registada (INSUFICIENCIA_RENAL), não transplantados; amostra-índice num
+#        dia "estável" (sem critério de LRA nos ±2 dias), com creatinina e ureia de valor único e
+#        fora de ECMO; escolhe-se o primeiro dia que cumpre.
+# Controlos: sem DRC, sem qualquer critério de LRA, TFGe proxy basal ≥60, não transplantados;
+#        mesmos critérios de dia; emparelhados por sexo, COVID, idade e dia de internamento.
+# Nota: não é um modelo útil em UCI; serve para validar o miniNIR.
+# =====================================================================
+estudo:
+  nome: "Diagnóstico de DRC (validação miniNIR)"
+  descricao: "Casos: DRC em dia estável (sem LRA ±2 dias); controlos: sem DRC e sem LRA, emparelhados por sexo, COVID, idade e dia de internamento."
+  semente: 20261113
 
+dados:
+  ficheiro: "../dados/Base_de_dados_Dem_PAT_SOFA_2026.xlsx"
+  folha: 0
+  id: "ID_ISEL"
+  colunas_numericas_com_texto: ["SOFA respiratório ", "SOFA cardiovascular", "SOFA neurológico", "DIA_UCI"]
+  auxiliares:
+    - ficheiro: "../dados/ISEL_BMI.xlsx"
+      id: "N_ISEL"
+      colunas: {BMI: IMC}
+
+# Mapeamento das colunas da base para os nomes que a ferramenta usa nas variáveis derivadas
+colunas:
+  n_amostra: "Nº Global de amostra"
+  data_colheita: "DT_COLHEITA"
+  data_admissao: "DATA_ADMISSAO_UCI"
+  data_alta: "DATA_ALTA_UCI"
+  idade: "IDADE"
+  sexo: "SEXO"
+  sexo_feminino: 1
+  vmi: "VMI"
+  vmi_inicio: "DATA_INICIO_VMI"
+  vmi_fim: "DATA_FIM_VMI"
+  ecmo: "ECMO"
+  ecmo_inicio: "DATA_INICIO_ECMO"
+  ecmo_fim: "DATA_FIM_ECMO"
+  creatinina_max: "Creatinina | Creatinina (dia_max) mg/dL"
+  creatinina_min: "Creatinina | Creatinina (dia_min) mg/dL"
+  ureia_max: "Ureia | Ureia (dia_max) mg/dL"
+  ureia_min: "Ureia | Ureia (dia_min) mg/dL"
+  sofa_total: "SOFA total"
+  sofa_renal: "SOFA renal"
+
+lra:
+  dias_admissao: 2          # LRA "presente na admissão" se detetada nos primeiros 2 dias com dados
+  janela_estavel_dias: 2    # 'sem_lra_janela' = sem critério de LRA nos ±2 dias
+
+# Variáveis adicionais definidas por expressão (podem ser usadas nos critérios abaixo)
+derivados:
+  DRC: "INSUFICIENCIA_RENAL == 1"
+
+grupos:
+  casos:
+    nome: "DRC (casos)"
+    doente:
+      - {nome: "DRC registada", expr: "DRC"}
+      - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
+    dia: &dia_estavel
+      - {nome: "Dia com amostra no biobanco", expr: "amostra"}
+      - {nome: "Fora de ECMO no dia", expr: "not em_ecmo_dia"}
+      - {nome: "Sem critério de LRA nos ±2 dias (dia estável)", expr: "sem_lra_janela"}
+      - {nome: "Creatinina e ureia com valor único no dia", expr: "cr_unico and ur_unico"}
+    indice: {regra: primeiro}
+  controlos:
+    nome: "Sem doença renal (controlos)"
+    doente:
+      - {nome: "Sem DRC registada", expr: "not DRC"}
+      - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
+      - {nome: "Sem qualquer critério de LRA no internamento", expr: "not lra_qualquer"}
+      - {nome: "TFGe proxy basal ≥60", expr: "tfge_basal_proxy >= 60"}
+    dia: *dia_estavel
+
+emparelhamento:
+  razao: 2                  # controlos principais por caso
+  suplentes_por_caso: 1
+  casos_sem_controlo: excluir
+  etapas:                   # aplicadas por ordem aos casos que ainda não completaram a razão
+    - {exato: [SEXO, COVID], calibre: {IDADE: 10, dias_desde_admissao: 5}}
+    - {exato: [SEXO],        calibre: {IDADE: 10, dias_desde_admissao: 5}}
+    - {exato: [SEXO],        calibre: {IDADE: 15, dias_desde_admissao: 7}}
+  reequilibrar:
+    ativo: true
+    max_iter: 3
+    fator_calibre: 0.5      # calibre para contínuas acrescentadas = 0,5 × desvio-padrão
+    candidatas: [sofa_nao_renal_dia, em_vmi_dia, VMI, DIABETES, HTA, OBESIDADE, IMC]
+
+equilibrio:
+  alfa: 0.05
+  variaveis:
+    # --- demográficas
+    - {col: IDADE, nome: "Idade (anos)", tipo: continua}
+    - {col: SEXO, nome: "Sexo", tipo: categorica, rotulos: {0: Masculino, 1: Feminino}}
+    - {col: IMC, nome: "IMC (kg/m²)", tipo: continua}
+    - {col: COVID, nome: "COVID-19", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: VAGA, nome: "Vaga epidémica", tipo: categorica}
+    - {col: MOTIVO_ADMISSAO, nome: "Motivo de admissão (código)", tipo: categorica}
+    # --- comorbilidades
+    - {col: COMORBILIDADES, nome: "Alguma comorbilidade", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: HTA, nome: "Hipertensão arterial", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: DIABETES, nome: "Diabetes", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: OBESIDADE, nome: "Obesidade", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: DISLIPIDEMIA, nome: "Dislipidemia", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: CARDIOPATIA_ISQUEMICA, nome: "Cardiopatia isquémica", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: ICC, nome: "Insuficiência cardíaca", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: DPCO_ASMA_ENFISEMA, nome: "DPOC/asma/enfisema", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: NEOPLASIA_SOLIDA, nome: "Neoplasia sólida", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: DHC, nome: "Doença hepática crónica", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    # --- internamento
+    - {col: VMI, nome: "VMI no internamento", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: em_vmi_dia, nome: "Em VMI no dia da amostra", tipo: categorica, rotulos: {false: Não, true: Sim}}
+    - {col: ECMO, nome: "ECMO no internamento", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: dias_desde_admissao, nome: "Dias desde a admissão até à amostra", tipo: continua}
+    - {col: dias_vmi_ate_amostra, nome: "Dias em VMI à data da amostra", tipo: continua}
+    - {col: sofa_nao_renal_dia, nome: "SOFA não renal no dia da amostra", tipo: continua}
+    - {col: duracao_uci_dias, nome: "Duração do internamento UCI (dias)", tipo: continua, testar: false}   # posterior ao índice: descritiva
+    # --- descritivas (não testadas para equilíbrio)
+    - {col: tfge_dia, nome: "TFGe no dia da amostra (descritiva)", tipo: continua, testar: false}
+    - {col: lra_qualquer, nome: "LRA em algum momento do internamento", tipo: categorica, rotulos: {false: Não, true: Sim}, testar: false}
+    - {col: OBITO_UCI, nome: "Óbito na UCI", tipo: categorica, rotulos: {0: Não, 1: Sim}, testar: false}
+
+saida:
+  ficheiro: "../resultados/selecao_diagnostico_DRC.xlsx"
+  colunas: [dias_desde_admissao, cr_dia, cr_max_dia, cr_min_dia, ur_dia, tfge_dia, tfge_basal_proxy,
+            lra_estadio_max, sofa_total_dia, sofa_nao_renal_dia, em_vmi_dia, em_ecmo_dia, OBITO_UCI]
