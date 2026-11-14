@@ -90,3 +90,9 @@ def test_table1_flags_difference():
     b = pd.DataFrame({"x": rng.normal(13, 1, 50), "s": [1] * 25 + [0] * 25})
     t = table1(a, b, [{"col": "x", "tipo": "continua"}, {"col": "s", "tipo": "categorica"}], 0.05, rng)
     assert (t["Diferença significativa"] == "Sim").sum() == 2
+
+
+def test_fisher_rxc_is_reproducible():
+    t = np.array([[10, 1, 0, 4, 1, 1], [22, 6, 1, 0, 0, 4]])
+    ps = {comparar_categorica(t, np.random.default_rng(i))[0] for i in range(3)}
+    assert len(ps) == 1
