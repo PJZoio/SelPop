@@ -1,0 +1,16 @@
+# Dados de doentes e resultados NUNCA entram no repositório (o repositório é público)
+dados/
+resultados/
+*.xlsx
+*.xls
+*.csv
+
+# Python
+__pycache__/
+*.pyc
+.pytest_cache/
+.venv/
+venv/
+
+# Streamlit
+.streamlit/secrets.toml

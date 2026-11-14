@@ -53,11 +53,19 @@ def comparar_categorica(tab: np.ndarray, rng: np.random.Generator):
         return None, "—"
     chi2, p, dof, exp = st.chi2_contingency(tab, correction=False)
     if (exp < 5).any():
-        try:
+        if tab.shape == (2, 2):
             return st.fisher_exact(tab).pvalue, "Fisher exato"
-        except Exception:  # SciPy antigo: Fisher só 2x2 → p por permutação do qui-quadrado
-            return _perm_chi2(tab, chi2, rng), "Qui-quadrado (permutação)"
+        # r×c: o SciPy estima o p de Fisher por reamostragem; semente fixa para o resultado ser reprodutível
+        try:
+            meth = st.MonteCarloMethod(n_resamples=FISHER_RXC_N, rng=np.random.default_rng(FISHER_RXC_SEED))
+            return st.fisher_exact(tab, method=meth).pvalue, "Fisher (Monte Carlo)"
+        except (TypeError, AttributeError, ValueError):  # SciPy antigo: sem Fisher r×c
+            return _perm_chi2(tab, chi2, np.random.default_rng(FISHER_RXC_SEED)), "Qui-quadrado (permutação)"
     return p, "Qui-quadrado"
+
+
+FISHER_RXC_N = 9999
+FISHER_RXC_SEED = 20250101
 
 
 def _perm_chi2(tab, chi2_obs, rng, n=10000):

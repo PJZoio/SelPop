@@ -36,16 +36,26 @@ def _assemble(cases, controls, m, idc, policy):
 
 
 def run(cfg: dict, base_dir: Path, log=print) -> dict:
+    """Linha de comandos: carregar ficheiros → preparar → selecionar."""
+    raw, prov = load(cfg, base_dir)
+    log(f"Base: {len(raw)} linhas, {raw[cfg['dados']['id']].nunique()} doentes")
+    df, qc = prepare(cfg, raw)
+    return select(cfg, df, qc, prov, log)
+
+
+def prepare(cfg: dict, raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
+    """Variáveis derivadas + expressões + controlo de qualidade. Depende só de `colunas`, `lra` e `derivados`."""
+    df = derive(raw, cfg)
+    df = add_expressions(df, cfg.get("derivados"))
+    return df, quality_checks(df, cfg)
+
+
+def select(cfg: dict, df: pd.DataFrame, qc: pd.DataFrame, prov: list[dict], log=print) -> dict:
+    """Grupos → emparelhamento → Tabela 1 → reequilíbrio, sobre dados já preparados."""
     seed = int(cfg["estudo"].get("semente", 12345))
     rng = np.random.default_rng(seed)
     idc = cfg["dados"]["id"]
     alpha = float(cfg["equilibrio"].get("alfa", 0.05))
-
-    raw, prov = load(cfg, base_dir)
-    log(f"Base: {len(raw)} linhas, {raw[idc].nunique()} doentes")
-    df = derive(raw, cfg)
-    df = add_expressions(df, cfg.get("derivados"))
-    qc = quality_checks(df, cfg)
     cases, controls, funil = build_groups(df, cfg, rng)
     log(f"Casos elegíveis: {len(cases)} | controlos candidatos: {controls[idc].nunique()} doentes / {len(controls)} dias")
 

@@ -10,10 +10,35 @@ não precisa de ser alterado para criar um estudo novo.
 Requer Python ≥ 3.10.
 
 ```bash
-pip install pandas numpy scipy openpyxl pyyaml
+pip install -r requirements.txt
 ```
 
-## Utilização
+## Interface gráfica
+
+```bash
+streamlit run app.py
+```
+
+Abre no browser (http://localhost:8501). Na barra lateral escolhe-se o modelo de estudo (ou carrega-se um YAML)
+e carregam-se a base e os ficheiros auxiliares. Os separadores permitem:
+
+- **Critérios** — editar os critérios de casos e controlos (ativar/desativar, acrescentar linhas) e ver o funil
+  atualizado em tempo real; regra do dia-índice; lista das colunas disponíveis para as expressões.
+- **Emparelhamento** — razão, suplentes, etapas (exato e calibres), semente e reequilíbrio automático.
+- **Variáveis da Tabela 1** — variáveis, tipo, rótulos, quais testar; α.
+- **Resultados** — correr a seleção; Tabela 1, gráfico de equilíbrio antes/depois (SMD), funil, amostras
+  selecionadas; descarregar o Excel completo e o YAML da configuração usada.
+- **Dados** — controlo de qualidade e ficheiros carregados (com SHA-256).
+- **Configuração** — o YAML equivalente ao que está nos separadores.
+
+Guardar sempre o YAML junto do Excel: com a mesma base, reproduz exatamente a mesma seleção, também na
+linha de comandos.
+
+> **Privacidade.** Os ficheiros carregados ficam só na memória da sessão. Correr a aplicação localmente.
+> Não a publicar num servidor público (Render, Streamlit Community Cloud, etc.) com dados de doentes.
+> O `.gitignore` impede que `dados/`, `resultados/` e ficheiros Excel entrem no repositório.
+
+## Linha de comandos
 
 ```bash
 cd selpop
@@ -116,7 +141,7 @@ coluna da base (com acentos ou espaços, entre acentos graves: `` `SOFA total` >
 
 - **Testes** (Fonseca et al., *Comput Biol Med* 2025; Araújo et al., *Metabolites* 2025): contínuas em
   mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student se ambos normais, senão Mann–Whitney U.
-  Categóricas em n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5 (r×c incluído).
+  Categóricas em n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Em tabelas maiores que 2×2, o p de Fisher é estimado por Monte Carlo (9 999 reamostragens, semente fixa), para ser reprodutível.
   Bilateral, α configurável, sem correção para comparações múltiplas.
 - **SMD**: acrescentado porque "p ≥ α" com grupos pequenos não demonstra equilíbrio. |SMD| < 0,1 é o
   limiar habitual; com n ≈ 30 por grupo, valores até ~0,2–0,3 são frequentes e devem ser discutidos.
