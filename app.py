@@ -449,7 +449,7 @@ with tabs[3]:
                    [c for c in cfg_now.get("saida", {}).get("colunas", []) if c in sel.columns]
         sel = sel[[c for c in showcols if c in sel.columns]].rename(columns={"_caso": "Emparelhado com"})
         sel[cmap["data_colheita"]] = pd.to_datetime(sel[cmap["data_colheita"]]).dt.date
-        sel["Emparelhado com"] = sel["Emparelhado com"].astype("object").where(sel["Emparelhado com"].notna(), "")
+        sel["Emparelhado com"] = [("" if pd.isna(v) else str(int(v))) for v in pd.to_numeric(sel["Emparelhado com"], errors="coerce")]
         st.dataframe(sel, hide_index=True, width="stretch", height=360)
 
 # ---------------------------------------------------------------- 5. dados
