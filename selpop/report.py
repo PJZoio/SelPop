@@ -107,20 +107,20 @@ def write(R: dict, out_path: str | Path):
     leia += [("", "")] + METODOS
 
     with pd.ExcelWriter(out_path, engine="openpyxl") as xw:
-        pd.DataFrame(leia, columns=["Item", "Descrição"]).to_excel(xw, "LEIA-ME", index=False)
-        R["funil"].to_excel(xw, "Funil", index=False)
-        R["qc"].to_excel(xw, "Qualidade_dados", index=False)
-        ta.drop(columns="_k").to_excel(xw, "Tabela1", index=False, startrow=2)
-        eq.to_excel(xw, "Equilibrio_antes_depois", index=False)
-        sel.to_excel(xw, "Selecao", index=False)
-        (sup if len(sup) else pd.DataFrame({"Nota": ["Sem suplentes"]})).to_excel(xw, "Suplentes", index=False)
+        pd.DataFrame(leia, columns=["Item", "Descrição"]).to_excel(xw, sheet_name="LEIA-ME", index=False)
+        R["funil"].to_excel(xw, sheet_name="Funil", index=False)
+        R["qc"].to_excel(xw, sheet_name="Qualidade_dados", index=False)
+        ta.drop(columns="_k").to_excel(xw, sheet_name="Tabela1", index=False, startrow=2)
+        eq.to_excel(xw, sheet_name="Equilibrio_antes_depois", index=False)
+        sel.to_excel(xw, sheet_name="Selecao", index=False)
+        (sup if len(sup) else pd.DataFrame({"Nota": ["Sem suplentes"]})).to_excel(xw, sheet_name="Suplentes", index=False)
         if len(unmatched):
             u = unmatched[[idc, cfg["colunas"]["n_amostra"], cfg["colunas"]["data_colheita"]] +
                           [v["col"] for v in cfg["equilibrio"]["variaveis"] if v["col"] in unmatched.columns][:8]]
-            u.to_excel(xw, "Casos_sem_controlo", index=False)
+            u.to_excel(xw, sheet_name="Casos_sem_controlo", index=False)
         if len(R["iters"]):
-            R["iters"].to_excel(xw, "Iteracoes", index=False)
-        pd.DataFrame({"Configuração (YAML) usada nesta execução": yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False).splitlines()}).to_excel(xw, "Config", index=False)
+            R["iters"].to_excel(xw, sheet_name="Iteracoes", index=False)
+        pd.DataFrame({"Configuração (YAML) usada nesta execução": yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False).splitlines()}).to_excel(xw, sheet_name="Config", index=False)
 
     wb = load_workbook(out_path)
     _style(wb["LEIA-ME"], widths={"A": 30, "B": 120}, wrap=("A", "B"))
