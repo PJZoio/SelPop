@@ -52,6 +52,42 @@ Os dados **não vêm no pacote**. Copiar para `dados/`:
 
 O resultado é um Excel em `resultados/`. Testes (dados sintéticos): `python -m pytest tests -q`.
 
+## Vários estudos num só Excel
+
+```bash
+python -m selpop.consolidar estudos/prognostico_lra.yaml estudos/diagnostico_lra.yaml estudos/diagnostico_drc.yaml \
+    --rotulos M1 M2 M3 --saida resultados/Selecao_amostras_biobanco_UCI_miniNIR.xlsx
+```
+
+Gera um Excel com: LEIA-ME (modelos, notas de desenho, métodos), **Resumo**, **Variaveis** (papel de cada
+variável em cada modelo), **Pedido_biobanco** (lista única de amostras, por prioridade: casos, controlos
+principais, suplentes; com o uso em cada modelo), Qualidade_dados e, por modelo, Funil, Tabela 1, Seleção,
+Suplentes e Configuração.
+
+### Modelos incluídos
+
+| Rótulo | Configuração | Casos | Controlos |
+|---|---|---|---|
+| M1 | `prognostico_lra.yaml` | Sem DRC, LRA no internamento; amostra 1–3 dias antes do início | Sem DRC, sem LRA; dia de internamento equivalente |
+| M2 | `diagnostico_lra.yaml` | Os mesmos doentes; amostra no dia de início (ou seguinte) | Re-emparelhados no dia equivalente |
+| M3 | `diagnostico_drc.yaml` | DRC em dia estável (sem LRA ±2 dias) | Sem DRC, sem LRA, TFGe basal ≥60 |
+
+## Papéis das variáveis na Tabela 1
+
+Cada variável tem um `papel`:
+
+| Papel | Significado | Conta para o reequilíbrio? |
+|---|---|---|
+| `confundidor` (por omissão) | Deve estar equilibrado entre grupos | Sim |
+| `preditor` | Candidato a prever o desfecho (ex.: SOFA cardiovascular, troponina, lactato na LRA). Testado, **não emparelhado**: emparelhar anularia o sinal a estudar | Não |
+| `interferente` | Pode alterar o espetro NIR (LDH/hemólise, bilirrubina, CK). Monitorizar | Não |
+| `testar: false` | Descritiva (posterior à amostra ou informativa) | Não |
+
+`log: true` calcula o SMD em escala log (variáveis muito assimétricas). O bloco `aliases` dá nomes curtos e
+numéricos a colunas de laboratório com nomes longos (ex.: `troponina_dia`). Os modelos de LRA emparelham a
+gravidade pelo `sofa_nao_renal_nao_cv_dia` (SOFA sem renal nem cardiovascular), para deixar o componente
+cardiovascular livre como preditor.
+
 ## O que a ferramenta faz
 
 1. **Carrega** a base e junta ficheiros auxiliares por ID (ex.: IMC). Regista o SHA-256 de cada ficheiro.
@@ -127,6 +163,7 @@ coluna da base (com acentos ou espaços, entre acentos graves: `` `SOFA total` >
 | `em_vmi_dia`, `em_ecmo_dia` | dia | O dia está dentro do período de VMI/ECMO |
 | `dias_vmi_ate_amostra` | dia | Dias em VMI à data da colheita |
 | `sofa_total_dia`, `sofa_nao_renal_dia` | dia | SOFA total e SOFA total − SOFA renal |
+| `sofa_cv_dia`, `sofa_nao_renal_nao_cv_dia` | dia | SOFA cardiovascular; SOFA total − renal − cardiovascular |
 | `tfge_dia` | dia | CKD-EPI 2021 com a creatinina mínima do dia |
 | `lra_dia`, `lra_estadio_dia` | dia | Critério KDIGO de creatinina cumprido nesse dia, e estádio |
 | `sem_lra_janela` | dia | Sem critério de LRA nos ±k dias (`lra.janela_estavel_dias`) |

@@ -3,4 +3,4 @@
 Pipeline: carregar → derivar variáveis → elegibilidade → definir casos e controlos → emparelhar
 → testar o equilíbrio (Tabela 1) → (opcional) reequilibrar → exportar Excel.
 """
-__version__ = "0.2.0"
+__version__ = "0.3.0"

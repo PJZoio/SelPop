@@ -43,6 +43,14 @@ def run(cfg: dict, base_dir: Path, log=print) -> dict:
     return select(cfg, df, qc, prov, log)
 
 
+PREP_KEYS = ("dados", "colunas", "lra", "derivados", "aliases")
+
+
+def prep_key_of(cfg: dict) -> str:
+    """Só estas partes da configuração afetam a preparação da base."""
+    return yaml.safe_dump({k: cfg.get(k) for k in PREP_KEYS}, sort_keys=True, allow_unicode=True)
+
+
 def prepare(cfg: dict, raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
     """Variáveis derivadas + expressões + controlo de qualidade. Depende só de `colunas`, `lra` e `derivados`."""
     df = derive(raw, cfg)
@@ -78,11 +86,12 @@ def select(cfg: dict, df: pd.DataFrame, qc: pd.DataFrame, prov: list[dict], log=
             t = table1(sc, sk, bvars, alpha, np.random.default_rng(seed), names)
             tested = t[t.p.notna()]
             label_of = {v.get("nome", v["col"]): v for v in bvars}
-            sig = [label_of[l] for l in tested[tested.p < alpha]["Variável"] if l in label_of]
+            sig = [label_of[l] for l in tested[tested.p < alpha]["Variável"] if l in label_of
+                   and label_of[l].get("papel", "confundidor") == "confundidor"]  # preditores/interferentes não contam
             results.append((m, sc, sk, t, copy.deepcopy(spec)))
             iters.append({"Iteração": it, "Casos emparelhados": int(sc[idc].nunique()), "Controlos (principais)": len(sk),
-                          "Variáveis com p < α": ", ".join(v.get("nome", v["col"]) for v in sig) or "nenhuma",
-                          "N.º variáveis com p < α": len(sig),
+                          "Confundidores com p < α": ", ".join(v.get("nome", v["col"]) for v in sig) or "nenhuma",
+                          "N.º confundidores com p < α": len(sig),
                           "Emparelhamento usado": " | ".join(_stage_txt(s) for s in spec["etapas"])})
             todo = [v for v in sig if v["col"] in cands]
             if not todo or it == int(reeq.get("max_iter", 0)):
@@ -99,7 +108,7 @@ def select(cfg: dict, df: pd.DataFrame, qc: pd.DataFrame, prov: list[dict], log=
                     s["exato"] = list(dict.fromkeys((s.get("exato") or []) + [col]))
             log(f"Reequilíbrio: iteração {it + 1} acrescenta {col} ao emparelhamento")
         # melhor iteração: menos variáveis significativas, depois mais casos emparelhados, depois a mais cedo
-        best = min(range(len(results)), key=lambda i: (iters[i]["N.º variáveis com p < α"], -iters[i]["Casos emparelhados"], i))
+        best = min(range(len(results)), key=lambda i: (iters[i]["N.º confundidores com p < α"], -iters[i]["Casos emparelhados"], i))
         for i, r in enumerate(iters):
             r["Escolhida"] = "Sim" if i == best else ""
         m, sel_cases, sel_ctrl, t_after, spec_used = results[best]

@@ -96,3 +96,41 @@ def test_fisher_rxc_is_reproducible():
     t = np.array([[10, 1, 0, 4, 1, 1], [22, 6, 1, 0, 0, 4]])
     ps = {comparar_categorica(t, np.random.default_rng(i))[0] for i in range(3)}
     assert len(ps) == 1
+
+
+def test_papel_and_log_smd():
+    from selpop.stats import papel
+    assert papel({"col": "x"}).startswith("Confundidor")
+    assert papel({"col": "x", "papel": "preditor"}).startswith("Preditor")
+    assert papel({"col": "x", "testar": False}) == "Descritiva"
+    rng = np.random.default_rng(0)
+    a = pd.DataFrame({"t": np.exp(rng.normal(2, 1, 60))})
+    b = pd.DataFrame({"t": np.exp(rng.normal(1, 1, 60))})
+    raw = table1(a, b, [{"col": "t", "tipo": "continua"}], 0.05, rng)
+    lg = table1(a, b, [{"col": "t", "tipo": "continua", "log": True}], 0.05, rng)
+    assert lg.SMD.iloc[0] == pytest.approx(1.0, abs=0.35)   # diferença de 1 DP na escala log
+    assert raw.SMD.iloc[0] != lg.SMD.iloc[0]
+
+
+def test_predictors_do_not_drive_rebalance():
+    """Um preditor com p < α não deve ser acrescentado ao emparelhamento."""
+    from selpop.pipeline import select
+    rng = np.random.default_rng(3)
+    n = 60
+    rows = []
+    for pid in range(n):
+        case = pid < 20
+        rows.append({"id": pid, "SEXO": pid % 2, "IDADE": 60 + (pid % 7), "dia": 2, "pred": (5 if case else 1) + rng.normal(0, .5),
+                     "is_case": case})
+    df = pd.DataFrame(rows)
+    cfg = {"estudo": {"semente": 1}, "dados": {"id": "id"},
+           "grupos": {"casos": {"nome": "C", "doente": "is_case"}, "controlos": {"nome": "K", "doente": "not is_case"}},
+           "emparelhamento": {"razao": 1, "etapas": [{"exato": ["SEXO"], "calibre": {"IDADE": 10}}],
+                              "reequilibrar": {"ativo": True, "max_iter": 2, "candidatas": ["pred"]}},
+           "equilibrio": {"alfa": 0.05, "variaveis": [{"col": "IDADE", "tipo": "continua"},
+                                                       {"col": "pred", "tipo": "continua", "papel": "preditor"}]}}
+    R = select(cfg, df, pd.DataFrame(), [])
+    assert len(R["iters"]) == 1                                   # não houve reequilíbrio
+    assert "pred" not in R["spec_used"]["etapas"][0]["calibre"]
+    row = R["t_after"][R["t_after"]["Variável"] == "pred"].iloc[0]
+    assert row.p < 0.05 and row.Papel.startswith("Preditor")

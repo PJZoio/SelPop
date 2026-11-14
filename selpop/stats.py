@@ -79,6 +79,17 @@ def _perm_chi2(tab, chi2_obs, rng, n=10000):
     return (hits + 1) / (n + 1)
 
 
+PAPEIS = {"confundidor": "Confundidor (equilibrar)", "preditor": "Preditor candidato (não emparelhar)",
+          "interferente": "Interferente analítico (monitorizar)", "descritiva": "Descritiva"}
+
+
+def papel(v: dict) -> str:
+    """Papel da variável na Tabela 1. Só os confundidores contam para o reequilíbrio."""
+    if not v.get("testar", True):
+        return PAPEIS["descritiva"]
+    return PAPEIS.get(v.get("papel", "confundidor"), v.get("papel", "confundidor"))
+
+
 def table1(a: pd.DataFrame, b: pd.DataFrame, variables: list[dict], alpha: float, rng, names=("Casos", "Controlos"),
            smd_lim: float = 0.1) -> pd.DataFrame:
     out = []
@@ -86,7 +97,8 @@ def table1(a: pd.DataFrame, b: pd.DataFrame, variables: list[dict], alpha: float
         col, label, kind = v["col"], v.get("nome", v["col"]), v.get("tipo", "continua")
         test = v.get("testar", True)
         if col not in a.columns:
-            out.append({"Variável": label, "Nível": "", names[0]: "coluna em falta", names[1]: "", "Teste": "", "p": None, "SMD": None})
+            out.append({"Variável": label, "Nível": "", names[0]: "coluna em falta", names[1]: "", "Teste": "", "p": None, "SMD": None,
+                        "Papel": papel(v)})
             continue
         xa, xb = a[col], b[col]
         miss = f"{int(xa.isna().sum())}/{int(xb.isna().sum())}"
@@ -94,8 +106,13 @@ def table1(a: pd.DataFrame, b: pd.DataFrame, variables: list[dict], alpha: float
             xa, xb = pd.to_numeric(xa, errors="coerce"), pd.to_numeric(xb, errors="coerce")
             f = lambda s: "—" if s.notna().sum() == 0 else f"{s.median():.1f} ({s.quantile(.25):.1f}–{s.quantile(.75):.1f})"
             p, tn = comparar_continua(xa, xb) if test else (None, "descritiva")
+            if v.get("log"):  # SMD em escala log para variáveis assimétricas (ex.: troponina, D-dímero)
+                la, lb = np.log(xa.where(xa > 0)), np.log(xb.where(xb > 0))
+                smd = smd_cont(la, lb)
+            else:
+                smd = smd_cont(xa, xb)
             out.append({"Variável": label, "Nível": "mediana (P25–P75)", names[0]: f(xa), names[1]: f(xb), "Teste": tn,
-                        "p": _fmt_p(p), "SMD": round(float(smd_cont(xa, xb)), 3), "Em falta (casos/controlos)": miss})
+                        "p": _fmt_p(p), "SMD": round(float(smd), 3), "Em falta (casos/controlos)": miss, "Papel": papel(v)})
         else:
             labs = v.get("rotulos") or {}
             xa_, xb_ = xa.dropna(), xb.dropna()
@@ -112,7 +129,8 @@ def table1(a: pd.DataFrame, b: pd.DataFrame, variables: list[dict], alpha: float
                 out.append({"Variável": label if j == 0 else "", "Nível": str(labs.get(l, labs.get(str(l), l))),
                             names[0]: f"{tab[0, i]} ({pa:.0f}%)", names[1]: f"{tab[1, i]} ({pb:.0f}%)",
                             "Teste": tn if j == 0 else "", "p": _fmt_p(p) if j == 0 else None,
-                            "SMD": round(float(smd), 3) if j == 0 else None, "Em falta (casos/controlos)": miss if j == 0 else ""})
+                            "SMD": round(float(smd), 3) if j == 0 else None, "Em falta (casos/controlos)": miss if j == 0 else "",
+                            "Papel": papel(v) if j == 0 else ""})
     t = pd.DataFrame(out)
     t["Diferença significativa"] = np.where(t.p.notna() & (t.p < alpha), "Sim", np.where(t.p.notna(), "Não", ""))
     tested = t["Teste"].ne("descritiva")

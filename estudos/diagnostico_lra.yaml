@@ -1,0 +1,156 @@
+# =====================================================================
+# Estudo: DIAGNÓSTICO DE LRA em UCI
+# Pergunta: o miniNIR reconhece a LRA já instalada (dia de início)?
+# Casos: os mesmos doentes do modelo 1 (sem DRC, LRA por subida, sem LRA na admissão);
+#        amostra-índice no dia de início da LRA ou no dia seguinte (alvo: dia de início).
+# Nota: a LRA é definida pela creatinina; este modelo testa sobretudo se o miniNIR reproduz
+#        uma classificação baseada na creatinina (validação analítica), não informação nova.
+# Controlos: doentes sem DRC e sem qualquer critério de LRA no internamento, com ≥3 dias de
+#        seguimento após a amostra; emparelhados no dia de internamento da amostra (marco temporal).
+# Gravidade emparelhada pelo SOFA SEM os componentes renal e cardiovascular: a disfunção cardiovascular
+#        (SOFA CV, troponina, lactato) é um preditor candidato de LRA e fica livre para ser estudada.
+# =====================================================================
+estudo:
+  nome: "Modelo 2 — Diagnóstico de LRA (UCI)"
+  descricao: "Casos: amostra no dia de início da LRA (ou dia seguinte); controlos: sem LRA, emparelhados por sexo, COVID, idade e dia de internamento."
+  semente: 20261113
+  notas:
+    - Os casos são, em grande parte, os mesmos doentes do M1 (amostra posterior). Usar a mesma partição por doente nos dois modelos.
+    - 'A LRA é definida pela creatinina: este modelo testa sobretudo se o miniNIR reproduz uma classificação baseada na creatinina (validação analítica). Reportar o desempenho por estádio.'
+    - Controlos emparelhados de novo, no dia de internamento equivalente ao do início da LRA (não reaproveitam os pares do M1).
+
+dados:
+  ficheiro: "../dados/Base_de_dados_Dem_PAT_SOFA_2026.xlsx"
+  folha: 0
+  id: "ID_ISEL"
+  colunas_numericas_com_texto: ["SOFA respiratório ", "SOFA cardiovascular", "SOFA neurológico", "DIA_UCI"]
+  auxiliares:
+    - ficheiro: "../dados/ISEL_BMI.xlsx"
+      id: "N_ISEL"
+      colunas: {BMI: IMC}
+
+# Mapeamento das colunas da base para os nomes que a ferramenta usa nas variáveis derivadas
+colunas:
+  n_amostra: "Nº Global de amostra"
+  data_colheita: "DT_COLHEITA"
+  data_admissao: "DATA_ADMISSAO_UCI"
+  data_alta: "DATA_ALTA_UCI"
+  idade: "IDADE"
+  sexo: "SEXO"
+  sexo_feminino: 1
+  vmi: "VMI"
+  vmi_inicio: "DATA_INICIO_VMI"
+  vmi_fim: "DATA_FIM_VMI"
+  ecmo: "ECMO"
+  ecmo_inicio: "DATA_INICIO_ECMO"
+  ecmo_fim: "DATA_FIM_ECMO"
+  creatinina_max: "Creatinina | Creatinina (dia_max) mg/dL"
+  creatinina_min: "Creatinina | Creatinina (dia_min) mg/dL"
+  ureia_max: "Ureia | Ureia (dia_max) mg/dL"
+  ureia_min: "Ureia | Ureia (dia_min) mg/dL"
+  sofa_total: "SOFA total"
+  sofa_renal: "SOFA renal"
+  sofa_cardiovascular: "SOFA cardiovascular"
+
+# Nomes curtos (numéricos) para colunas de laboratório usadas na Tabela 1 (valor máximo do dia)
+aliases:
+  troponina_dia: "Troponina I | Troponina I (alta sensibilidade) (dia_max) pg/mL"
+  lactato_dia: "Gasimetria   | Lac (dia_max) mmol/L"
+  ldh_dia: "Desidrogenase láctica (LDH) | Desidrogenase láctica (LDH) (dia_max) U/L"
+  bilirrubina_dia: "Bilirrubina total | Bilirrubina total (dia_max) mg/dL"
+  ck_dia: "Creatinacinase (CK) | Creatinacinase (CK) (dia_max) U/L"
+
+lra:
+  dias_admissao: 2          # LRA "presente na admissão" se detetada nos primeiros 2 dias com dados
+  janela_estavel_dias: 2    # 'sem_lra_janela' = sem critério de LRA nos ±2 dias
+
+# Variáveis adicionais definidas por expressão (podem ser usadas nos critérios abaixo)
+derivados:
+  DRC: "INSUFICIENCIA_RENAL == 1"
+
+grupos:
+  casos:
+    nome: "LRA instalada (casos)"
+    doente:
+      - {nome: "Sem DRC registada", expr: "not DRC"}
+      - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
+      - {nome: "LRA (subida KDIGO) no internamento", expr: "lra_subida"}
+      - {nome: "Sem LRA já presente na admissão", expr: "not lra_admissao"}
+    dia:
+      - {nome: "Dia com amostra no biobanco", expr: "amostra"}
+      - {nome: "Fora de ECMO no dia", expr: "not em_ecmo_dia"}
+      - {nome: "Dia de início da LRA ou dia seguinte", expr: "dias_ate_lra <= 0 and dias_ate_lra >= -1"}
+    indice: {regra: alvo, coluna: dias_ate_lra, alvo: 0}
+  controlos:
+    nome: "Sem LRA (controlos)"
+    doente:
+      - {nome: "Sem DRC registada", expr: "not DRC"}
+      - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
+      - {nome: "Sem qualquer critério de LRA no internamento", expr: "not lra_qualquer"}
+      - {nome: "TFGe proxy basal ≥60", expr: "tfge_basal_proxy >= 60"}
+    dia:
+      - {nome: "Dia com amostra no biobanco", expr: "amostra"}
+      - {nome: "Fora de ECMO no dia", expr: "not em_ecmo_dia"}
+      - {nome: "≥3 dias de seguimento de creatinina após a amostra", expr: "dias_obs_apos >= 3"}
+
+emparelhamento:
+  razao: 2                  # controlos principais por caso
+  suplentes_por_caso: 1
+  casos_sem_controlo: excluir
+  etapas:                   # aplicadas por ordem aos casos que ainda não completaram a razão
+    - {exato: [SEXO, COVID], calibre: {IDADE: 10, dias_desde_admissao: 3}}
+    - {exato: [SEXO],        calibre: {IDADE: 10, dias_desde_admissao: 3}}
+    - {exato: [SEXO],        calibre: {IDADE: 15, dias_desde_admissao: 5}}
+  reequilibrar:
+    ativo: true
+    max_iter: 3
+    fator_calibre: 0.5      # calibre para contínuas acrescentadas = 0,5 × desvio-padrão
+    candidatas: [sofa_nao_renal_nao_cv_dia, em_vmi_dia, VMI, DIABETES, HTA, OBESIDADE, IMC]
+
+equilibrio:
+  alfa: 0.05
+  variaveis:
+    # --- demográficas
+    - {col: IDADE, nome: "Idade (anos)", tipo: continua}
+    - {col: SEXO, nome: "Sexo", tipo: categorica, rotulos: {0: Masculino, 1: Feminino}}
+    - {col: IMC, nome: "IMC (kg/m²)", tipo: continua}
+    - {col: COVID, nome: "COVID-19", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: VAGA, nome: "Vaga epidémica", tipo: categorica}
+    - {col: MOTIVO_ADMISSAO, nome: "Motivo de admissão (código)", tipo: categorica}
+    # --- comorbilidades
+    - {col: COMORBILIDADES, nome: "Alguma comorbilidade", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: HTA, nome: "Hipertensão arterial", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: DIABETES, nome: "Diabetes", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: OBESIDADE, nome: "Obesidade", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: DISLIPIDEMIA, nome: "Dislipidemia", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: CARDIOPATIA_ISQUEMICA, nome: "Cardiopatia isquémica", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: ICC, nome: "Insuficiência cardíaca", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: DPCO_ASMA_ENFISEMA, nome: "DPOC/asma/enfisema", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: NEOPLASIA_SOLIDA, nome: "Neoplasia sólida", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: DHC, nome: "Doença hepática crónica", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    # --- internamento
+    - {col: VMI, nome: "VMI no internamento", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: em_vmi_dia, nome: "Em VMI no dia da amostra", tipo: categorica, rotulos: {false: Não, true: Sim}}
+    - {col: ECMO, nome: "ECMO no internamento", tipo: categorica, rotulos: {0: Não, 1: Sim}}
+    - {col: dias_desde_admissao, nome: "Dias desde a admissão até à amostra", tipo: continua}
+    - {col: dias_vmi_ate_amostra, nome: "Dias em VMI à data da amostra", tipo: continua}
+    - {col: sofa_nao_renal_nao_cv_dia, nome: "SOFA sem componentes renal e cardiovascular (dia)", tipo: continua}
+    # --- preditores candidatos de LRA (testados, NÃO emparelhados: emparelhar anularia o sinal a estudar)
+    - {col: sofa_cv_dia, nome: "SOFA cardiovascular no dia", tipo: continua, papel: preditor}
+    - {col: troponina_dia, nome: "Troponina I hs (pg/mL)", tipo: continua, papel: preditor, log: true}
+    - {col: lactato_dia, nome: "Lactato (mmol/L)", tipo: continua, papel: preditor, log: true}
+    # --- interferentes analíticos do espetro NIR (monitorizar; não emparelhar)
+    - {col: ldh_dia, nome: "LDH (U/L) — hemólise/lesão tecidular", tipo: continua, papel: interferente, log: true}
+    - {col: bilirrubina_dia, nome: "Bilirrubina total (mg/dL)", tipo: continua, papel: interferente, log: true}
+    - {col: ck_dia, nome: "CK (U/L) — lesão muscular", tipo: continua, papel: interferente, log: true}
+    # --- gravidade global (descritiva: inclui o componente cardiovascular)
+    - {col: sofa_nao_renal_dia, nome: "SOFA não renal no dia (inclui cardiovascular)", tipo: continua, testar: false}
+    - {col: duracao_uci_dias, nome: "Duração do internamento UCI (dias)", tipo: continua, testar: false}   # posterior ao índice: descritiva
+    # --- descritivas (não testadas para equilíbrio)
+    - {col: lra_estadio_max, nome: "Estádio máximo de LRA (KDIGO)", tipo: categorica, testar: false}
+    - {col: OBITO_UCI, nome: "Óbito na UCI", tipo: categorica, rotulos: {0: Não, 1: Sim}, testar: false}
+
+saida:
+  ficheiro: "../resultados/selecao_diagnostico_LRA.xlsx"
+  colunas: [dias_desde_admissao, dias_ate_lra, cr_max_dia, cr_min_dia, ur_dia, tfge_dia, tfge_basal_proxy,
+            lra_estadio_max, sofa_total_dia, sofa_cv_dia, sofa_nao_renal_nao_cv_dia, troponina_dia, lactato_dia, em_vmi_dia, em_ecmo_dia, OBITO_UCI]
