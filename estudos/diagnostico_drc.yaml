@@ -9,9 +9,13 @@
 # Nota: não é um modelo útil em UCI; serve para validar o miniNIR.
 # =====================================================================
 estudo:
-  nome: "Diagnóstico de DRC (validação miniNIR)"
+  nome: "Modelo 3 — Diagnóstico de DRC (validação miniNIR)"
   descricao: "Casos: DRC em dia estável (sem LRA ±2 dias); controlos: sem DRC e sem LRA, emparelhados por sexo, COVID, idade e dia de internamento."
   semente: 20261113
+  notas:
+    - 'Modelo de validação do miniNIR (não útil em UCI): DRC registada vs função renal normal, fora de episódios agudos (sem LRA nos ±2 dias).'
+    - Os doentes com DRC não entram no M1 nem no M2 (LRA sobre DRC seria outro problema).
+    - 'Decisão pendente: exigir creatinina e ureia com valor único no dia reduz os casos de 25 para 19 doentes elegíveis. Necessário para usar a creatinina do dia como referência analítica; dispensável para classificar DRC.'
 
 dados:
   ficheiro: "../dados/Base_de_dados_Dem_PAT_SOFA_2026.xlsx"
@@ -44,6 +48,15 @@ colunas:
   ureia_min: "Ureia | Ureia (dia_min) mg/dL"
   sofa_total: "SOFA total"
   sofa_renal: "SOFA renal"
+  sofa_cardiovascular: "SOFA cardiovascular"
+
+# Nomes curtos (numéricos) para colunas de laboratório usadas na Tabela 1 (valor máximo do dia)
+aliases:
+  troponina_dia: "Troponina I | Troponina I (alta sensibilidade) (dia_max) pg/mL"
+  lactato_dia: "Gasimetria   | Lac (dia_max) mmol/L"
+  ldh_dia: "Desidrogenase láctica (LDH) | Desidrogenase láctica (LDH) (dia_max) U/L"
+  bilirrubina_dia: "Bilirrubina total | Bilirrubina total (dia_max) mg/dL"
+  ck_dia: "Creatinacinase (CK) | Creatinacinase (CK) (dia_max) U/L"
 
 lra:
   dias_admissao: 2          # LRA "presente na admissão" se detetada nos primeiros 2 dias com dados
@@ -56,6 +69,7 @@ derivados:
 grupos:
   casos:
     nome: "DRC (casos)"
+    nome_en: "patients with CKD"
     doente:
       - {nome: "DRC registada", expr: "DRC"}
       - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
@@ -67,6 +81,7 @@ grupos:
     indice: {regra: primeiro}
   controlos:
     nome: "Sem doença renal (controlos)"
+    nome_en: "controls without kidney disease"
     doente:
       - {nome: "Sem DRC registada", expr: "not DRC"}
       - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
@@ -96,8 +111,12 @@ equilibrio:
     - {col: SEXO, nome: "Sexo", tipo: categorica, rotulos: {0: Masculino, 1: Feminino}}
     - {col: IMC, nome: "IMC (kg/m²)", tipo: continua}
     - {col: COVID, nome: "COVID-19", tipo: categorica, rotulos: {0: Não, 1: Sim}}
-    - {col: VAGA, nome: "Vaga epidémica", tipo: categorica}
-    - {col: MOTIVO_ADMISSAO, nome: "Motivo de admissão (código)", tipo: categorica}
+    - {col: VAGA, nome: "Vaga epidémica", tipo: categorica,
+       rotulos: {1: 1.ª vaga, 2: 2.ª vaga, 3: 3.ª vaga, 4: 4.ª vaga, 5: 5.ª vaga, 6: 6.ª vaga},
+       rotulos_en: {1: Wave 1, 2: Wave 2, 3: Wave 3, 4: Wave 4, 5: Wave 5, 6: Wave 6}}
+    - {col: MOTIVO_ADMISSAO, nome: "Motivo de admissão", tipo: categorica,
+       rotulos: {1: Insuficiência respiratória aguda, 2: Cirúrgico urgente, 3: EAM, 4: AVC, 5: Choque séptico, 6: Alterações do ritmo cardíaco, 7: Síndrome de Guillain-Barré, 8: Insuficiência renal, 9: Outros},
+       rotulos_en: {1: Acute respiratory failure, 2: Urgent surgery, 3: Acute myocardial infarction, 4: Stroke, 5: Septic shock, 6: Cardiac arrhythmia, 7: Guillain–Barré syndrome, 8: Kidney failure, 9: Other}}
     # --- comorbilidades
     - {col: COMORBILIDADES, nome: "Alguma comorbilidade", tipo: categorica, rotulos: {0: Não, 1: Sim}}
     - {col: HTA, nome: "Hipertensão arterial", tipo: categorica, rotulos: {0: Não, 1: Sim}}
@@ -116,6 +135,10 @@ equilibrio:
     - {col: dias_desde_admissao, nome: "Dias desde a admissão até à amostra", tipo: continua}
     - {col: dias_vmi_ate_amostra, nome: "Dias em VMI à data da amostra", tipo: continua}
     - {col: sofa_nao_renal_dia, nome: "SOFA não renal no dia da amostra", tipo: continua}
+    # --- interferentes analíticos do espetro NIR (monitorizar; não emparelhar)
+    - {col: ldh_dia, nome: "LDH (U/L) — hemólise/lesão tecidular", tipo: continua, papel: interferente, log: true}
+    - {col: bilirrubina_dia, nome: "Bilirrubina total (mg/dL)", tipo: continua, papel: interferente, log: true}
+    - {col: ck_dia, nome: "CK (U/L) — lesão muscular", tipo: continua, papel: interferente, log: true}
     - {col: duracao_uci_dias, nome: "Duração do internamento UCI (dias)", tipo: continua, testar: false}   # posterior ao índice: descritiva
     # --- descritivas (não testadas para equilíbrio)
     - {col: tfge_dia, nome: "TFGe no dia da amostra (descritiva)", tipo: continua, testar: false}

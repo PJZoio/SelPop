@@ -5,11 +5,18 @@
 #        sem LRA já presente na admissão; amostra-índice 1–3 dias antes do início (alvo: 2 dias).
 # Controlos: doentes sem DRC e sem qualquer critério de LRA no internamento, com ≥3 dias de
 #        seguimento após a amostra; emparelhados no dia de internamento da amostra (marco temporal).
+# Gravidade emparelhada pelo SOFA SEM os componentes renal e cardiovascular: a disfunção cardiovascular
+#        (SOFA CV, troponina, lactato) é um preditor candidato de LRA e fica livre para ser estudada.
 # =====================================================================
 estudo:
-  nome: "Prognóstico de LRA (UCI)"
+  nome: "Modelo 1 — Prognóstico de LRA (UCI)"
   descricao: "Casos: amostra 1–3 dias antes do início de LRA; controlos: sem LRA, emparelhados por sexo, COVID, idade e dia de internamento."
   semente: 20261113
+  notas:
+    - Uma amostra por doente, no horizonte mais próximo de 2 dias antes do início da LRA (entre 1 e 3). Amostras D-1/D-2 adicionais só como análise secundária, com validação agrupada por doente.
+    - 'Gravidade emparelhada pelo SOFA sem componentes renal e cardiovascular. SOFA cardiovascular, troponina I e lactato são preditores candidatos: testados mas não emparelhados, para não anular o sinal a estudar.'
+    - 'Na modelação, comparar: só creatinina do dia; só miniNIR; miniNIR + creatinina; e preditores clínicos (SOFA CV, troponina, lactato) ± miniNIR. O miniNIR só antecipa a LRA se acrescentar informação à creatinina.'
+    - 'A troponina falta em cerca de metade dos controlos: foi pedida sobretudo com suspeita clínica (falta informativa). Tratar a falta explicitamente na modelação.'
 
 dados:
   ficheiro: "../dados/Base_de_dados_Dem_PAT_SOFA_2026.xlsx"
@@ -42,6 +49,15 @@ colunas:
   ureia_min: "Ureia | Ureia (dia_min) mg/dL"
   sofa_total: "SOFA total"
   sofa_renal: "SOFA renal"
+  sofa_cardiovascular: "SOFA cardiovascular"
+
+# Nomes curtos (numéricos) para colunas de laboratório usadas na Tabela 1 (valor máximo do dia)
+aliases:
+  troponina_dia: "Troponina I | Troponina I (alta sensibilidade) (dia_max) pg/mL"
+  lactato_dia: "Gasimetria   | Lac (dia_max) mmol/L"
+  ldh_dia: "Desidrogenase láctica (LDH) | Desidrogenase láctica (LDH) (dia_max) U/L"
+  bilirrubina_dia: "Bilirrubina total | Bilirrubina total (dia_max) mg/dL"
+  ck_dia: "Creatinacinase (CK) | Creatinacinase (CK) (dia_max) U/L"
 
 lra:
   dias_admissao: 2          # LRA "presente na admissão" se detetada nos primeiros 2 dias com dados
@@ -54,6 +70,7 @@ derivados:
 grupos:
   casos:
     nome: "LRA (casos)"
+    nome_en: "patients who developed AKI"
     doente:
       - {nome: "Sem DRC registada", expr: "not DRC"}
       - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
@@ -67,6 +84,7 @@ grupos:
     indice: {regra: alvo, coluna: dias_ate_lra, alvo: 2}
   controlos:
     nome: "Sem LRA (controlos)"
+    nome_en: "controls without AKI"
     doente:
       - {nome: "Sem DRC registada", expr: "not DRC"}
       - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
@@ -89,7 +107,7 @@ emparelhamento:
     ativo: true
     max_iter: 3
     fator_calibre: 0.5      # calibre para contínuas acrescentadas = 0,5 × desvio-padrão
-    candidatas: [sofa_nao_renal_dia, em_vmi_dia, VMI, DIABETES, HTA, OBESIDADE, IMC]
+    candidatas: [sofa_nao_renal_nao_cv_dia, em_vmi_dia, VMI, DIABETES, HTA, OBESIDADE, IMC]
 
 equilibrio:
   alfa: 0.05
@@ -99,8 +117,12 @@ equilibrio:
     - {col: SEXO, nome: "Sexo", tipo: categorica, rotulos: {0: Masculino, 1: Feminino}}
     - {col: IMC, nome: "IMC (kg/m²)", tipo: continua}
     - {col: COVID, nome: "COVID-19", tipo: categorica, rotulos: {0: Não, 1: Sim}}
-    - {col: VAGA, nome: "Vaga epidémica", tipo: categorica}
-    - {col: MOTIVO_ADMISSAO, nome: "Motivo de admissão (código)", tipo: categorica}
+    - {col: VAGA, nome: "Vaga epidémica", tipo: categorica,
+       rotulos: {1: 1.ª vaga, 2: 2.ª vaga, 3: 3.ª vaga, 4: 4.ª vaga, 5: 5.ª vaga, 6: 6.ª vaga},
+       rotulos_en: {1: Wave 1, 2: Wave 2, 3: Wave 3, 4: Wave 4, 5: Wave 5, 6: Wave 6}}
+    - {col: MOTIVO_ADMISSAO, nome: "Motivo de admissão", tipo: categorica,
+       rotulos: {1: Insuficiência respiratória aguda, 2: Cirúrgico urgente, 3: EAM, 4: AVC, 5: Choque séptico, 6: Alterações do ritmo cardíaco, 7: Síndrome de Guillain-Barré, 8: Insuficiência renal, 9: Outros},
+       rotulos_en: {1: Acute respiratory failure, 2: Urgent surgery, 3: Acute myocardial infarction, 4: Stroke, 5: Septic shock, 6: Cardiac arrhythmia, 7: Guillain–Barré syndrome, 8: Kidney failure, 9: Other}}
     # --- comorbilidades
     - {col: COMORBILIDADES, nome: "Alguma comorbilidade", tipo: categorica, rotulos: {0: Não, 1: Sim}}
     - {col: HTA, nome: "Hipertensão arterial", tipo: categorica, rotulos: {0: Não, 1: Sim}}
@@ -118,7 +140,17 @@ equilibrio:
     - {col: ECMO, nome: "ECMO no internamento", tipo: categorica, rotulos: {0: Não, 1: Sim}}
     - {col: dias_desde_admissao, nome: "Dias desde a admissão até à amostra", tipo: continua}
     - {col: dias_vmi_ate_amostra, nome: "Dias em VMI à data da amostra", tipo: continua}
-    - {col: sofa_nao_renal_dia, nome: "SOFA não renal no dia da amostra", tipo: continua}
+    - {col: sofa_nao_renal_nao_cv_dia, nome: "SOFA sem componentes renal e cardiovascular (dia)", tipo: continua}
+    # --- preditores candidatos de LRA (testados, NÃO emparelhados: emparelhar anularia o sinal a estudar)
+    - {col: sofa_cv_dia, nome: "SOFA cardiovascular no dia", tipo: continua, papel: preditor}
+    - {col: troponina_dia, nome: "Troponina I hs (pg/mL)", tipo: continua, papel: preditor, log: true}
+    - {col: lactato_dia, nome: "Lactato (mmol/L)", tipo: continua, papel: preditor, log: true}
+    # --- interferentes analíticos do espetro NIR (monitorizar; não emparelhar)
+    - {col: ldh_dia, nome: "LDH (U/L) — hemólise/lesão tecidular", tipo: continua, papel: interferente, log: true}
+    - {col: bilirrubina_dia, nome: "Bilirrubina total (mg/dL)", tipo: continua, papel: interferente, log: true}
+    - {col: ck_dia, nome: "CK (U/L) — lesão muscular", tipo: continua, papel: interferente, log: true}
+    # --- gravidade global (descritiva: inclui o componente cardiovascular)
+    - {col: sofa_nao_renal_dia, nome: "SOFA não renal no dia (inclui cardiovascular)", tipo: continua, testar: false}
     - {col: duracao_uci_dias, nome: "Duração do internamento UCI (dias)", tipo: continua, testar: false}   # posterior ao índice: descritiva
     # --- descritivas (não testadas para equilíbrio)
     - {col: lra_estadio_max, nome: "Estádio máximo de LRA (KDIGO)", tipo: categorica, testar: false}
@@ -127,4 +159,4 @@ equilibrio:
 saida:
   ficheiro: "../resultados/selecao_prognostico_LRA.xlsx"
   colunas: [dias_desde_admissao, dias_ate_lra, cr_max_dia, cr_min_dia, ur_dia, tfge_dia, tfge_basal_proxy,
-            lra_estadio_max, sofa_total_dia, sofa_nao_renal_dia, em_vmi_dia, em_ecmo_dia, OBITO_UCI]
+            lra_estadio_max, sofa_total_dia, sofa_cv_dia, sofa_nao_renal_nao_cv_dia, troponina_dia, lactato_dia, em_vmi_dia, em_ecmo_dia, OBITO_UCI]

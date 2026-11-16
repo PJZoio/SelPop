@@ -71,6 +71,10 @@ def _kdigo_patient(t, hi, lo, dias_admissao):
 
 def derive(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     c = cfg["colunas"]
+    # nomes curtos (numéricos) para colunas de laboratório com nomes longos
+    for alias, col in (cfg.get("aliases") or {}).items():
+        if col in df.columns:
+            df[alias] = to_num(df[col])
     idc, dt = cfg["dados"]["id"], c["data_colheita"]
     df = df.sort_values([idc, dt]).reset_index(drop=True).copy()
     for k in ("data_admissao", "vmi_inicio", "vmi_fim", "ecmo_inicio", "ecmo_fim", "data_colheita"):
@@ -95,6 +99,10 @@ def derive(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
     sofa_t, sofa_r = to_num(df[c["sofa_total"]]), to_num(df[c["sofa_renal"]])
     df["sofa_total_dia"] = sofa_t
     df["sofa_nao_renal_dia"] = sofa_t - sofa_r
+    if c.get("sofa_cardiovascular") in df.columns:
+        sofa_cv = to_num(df[c["sofa_cardiovascular"]])
+        df["sofa_cv_dia"] = sofa_cv
+        df["sofa_nao_renal_nao_cv_dia"] = sofa_t - sofa_r - sofa_cv
     df["tfge_dia"] = ckdepi2021(crmin, df[c["idade"]], fem)
 
     # --- LRA (KDIGO, critério de creatinina) e janelas temporais

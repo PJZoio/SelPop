@@ -52,6 +52,62 @@ Os dados **não vêm no pacote**. Copiar para `dados/`:
 
 O resultado é um Excel em `resultados/`. Testes (dados sintéticos): `python -m pytest tests -q`.
 
+## Vários estudos num só Excel
+
+```bash
+python -m selpop.consolidar estudos/prognostico_lra.yaml estudos/diagnostico_lra.yaml estudos/diagnostico_drc.yaml \
+    --rotulos M1 M2 M3 --saida resultados/Selecao_amostras_biobanco_UCI_miniNIR.xlsx
+```
+
+Gera um Excel com: LEIA-ME (modelos, notas de desenho, métodos), **Resumo**, **Variaveis** (papel de cada
+variável em cada modelo), **Pedido_biobanco** (lista única de amostras, por prioridade: casos, controlos
+principais, suplentes; com o uso em cada modelo), Qualidade_dados e, por modelo, Funil, Tabela 1, Seleção,
+Suplentes e Configuração.
+
+### Modelos incluídos
+
+| Rótulo | Configuração | Casos | Controlos |
+|---|---|---|---|
+| M1 | `prognostico_lra.yaml` | Sem DRC, LRA no internamento; amostra 1–3 dias antes do início | Sem DRC, sem LRA; dia de internamento equivalente |
+| M2 | `diagnostico_lra.yaml` | Os mesmos doentes; amostra no dia de início (ou seguinte) | Re-emparelhados no dia equivalente |
+| M3 | `diagnostico_drc.yaml` | DRC em dia estável (sem LRA ±2 dias) | Sem DRC, sem LRA, TFGe basal ≥60 |
+
+## Tabela 1 para o artigo e validação em SPSS/PSPP/jamovi
+
+Com `--publicacao` e `--sav` (linha de comandos ou consolidado) ou pelos botões do separador **Resultados**:
+
+- **Tabela 1 em Word** (`*_Table1_en.docx`; `--lingua pt` para português): secções (demografia, comorbilidades,
+  internamento, preditores, laboratório, desfechos), mediana [IIQ] ou n (%), n de cada grupo no cabeçalho, p com a
+  letra do teste e notas de rodapé (testes, critérios de emparelhamento, dados em falta). Também fica no Excel
+  (folha `Table1_publication` / `Mx_Table1_pub`). Nomes em inglês por omissão para as variáveis da base; a
+  configuração pode sobrepor com `nome_en`, `rotulos_en` e `secao`, e os grupos com `nome_en`.
+- **Dados em SPSS** (`*.sav`): amostras selecionadas (casos e controlos principais), variável `grupo` (1 = caso),
+  `conjunto` (ID do caso emparelhado) e as variáveis da Tabela 1, com rótulos de variáveis e de valores.
+  Abre no SPSS, PSPP, jamovi e JASP.
+- **Sintaxe de validação** (`*_validacao.sps`): `NPAR TESTS /M-W`, `T-TEST` e `CROSSTABS /STATISTICS=CHISQ` para
+  as mesmas variáveis. No SPSS/PSPP, comparar com a linha *Equal variances assumed* (t), *Pearson Chi-Square*
+  (sem correção de Yates) ou *Fisher's Exact Test* (2×2).
+
+Validação feita com o PSPP 2.0 nos três modelos: **71/71 testes com p idêntico** ao SelPop. As únicas diferenças
+são as variáveis com mais de 2 categorias (vaga, motivo de admissão), em que o SelPop usa Fisher (Monte Carlo) e o
+PSPP só oferece o qui-quadrado de Pearson.
+
+## Papéis das variáveis na Tabela 1
+
+Cada variável tem um `papel`:
+
+| Papel | Significado | Conta para o reequilíbrio? |
+|---|---|---|
+| `confundidor` (por omissão) | Deve estar equilibrado entre grupos | Sim |
+| `preditor` | Candidato a prever o desfecho (ex.: SOFA cardiovascular, troponina, lactato na LRA). Testado, **não emparelhado**: emparelhar anularia o sinal a estudar | Não |
+| `interferente` | Pode alterar o espetro NIR (LDH/hemólise, bilirrubina, CK). Monitorizar | Não |
+| `testar: false` | Descritiva (posterior à amostra ou informativa) | Não |
+
+`log: true` calcula o SMD em escala log (variáveis muito assimétricas). O bloco `aliases` dá nomes curtos e
+numéricos a colunas de laboratório com nomes longos (ex.: `troponina_dia`). Os modelos de LRA emparelham a
+gravidade pelo `sofa_nao_renal_nao_cv_dia` (SOFA sem renal nem cardiovascular), para deixar o componente
+cardiovascular livre como preditor.
+
 ## O que a ferramenta faz
 
 1. **Carrega** a base e junta ficheiros auxiliares por ID (ex.: IMC). Regista o SHA-256 de cada ficheiro.
@@ -127,6 +183,7 @@ coluna da base (com acentos ou espaços, entre acentos graves: `` `SOFA total` >
 | `em_vmi_dia`, `em_ecmo_dia` | dia | O dia está dentro do período de VMI/ECMO |
 | `dias_vmi_ate_amostra` | dia | Dias em VMI à data da colheita |
 | `sofa_total_dia`, `sofa_nao_renal_dia` | dia | SOFA total e SOFA total − SOFA renal |
+| `sofa_cv_dia`, `sofa_nao_renal_nao_cv_dia` | dia | SOFA cardiovascular; SOFA total − renal − cardiovascular |
 | `tfge_dia` | dia | CKD-EPI 2021 com a creatinina mínima do dia |
 | `lra_dia`, `lra_estadio_dia` | dia | Critério KDIGO de creatinina cumprido nesse dia, e estádio |
 | `sem_lra_janela` | dia | Sem critério de LRA nos ±k dias (`lra.janela_estavel_dias`) |
@@ -140,7 +197,7 @@ coluna da base (com acentos ou espaços, entre acentos graves: `` `SOFA total` >
 ## Métodos
 
 - **Testes** (Fonseca et al., *Comput Biol Med* 2025; Araújo et al., *Metabolites* 2025): contínuas em
-  mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student se ambos normais, senão Mann–Whitney U.
+  mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student (variâncias iguais) se ambos normais, senão Mann–Whitney U (aproximação normal com correção de empates, sem correção de continuidade — como o SPSS/PSPP).
   Categóricas em n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Em tabelas maiores que 2×2, o p de Fisher é estimado por Monte Carlo (9 999 reamostragens, semente fixa), para ser reprodutível.
   Bilateral, α configurável, sem correção para comparações múltiplas.
 - **SMD**: acrescentado porque "p ≥ α" com grupos pequenos não demonstra equilíbrio. |SMD| < 0,1 é o

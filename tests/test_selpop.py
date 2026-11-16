@@ -96,3 +96,89 @@ def test_fisher_rxc_is_reproducible():
     t = np.array([[10, 1, 0, 4, 1, 1], [22, 6, 1, 0, 0, 4]])
     ps = {comparar_categorica(t, np.random.default_rng(i))[0] for i in range(3)}
     assert len(ps) == 1
+
+
+def test_papel_and_log_smd():
+    from selpop.stats import papel
+    assert papel({"col": "x"}).startswith("Confundidor")
+    assert papel({"col": "x", "papel": "preditor"}).startswith("Preditor")
+    assert papel({"col": "x", "testar": False}) == "Descritiva"
+    rng = np.random.default_rng(0)
+    a = pd.DataFrame({"t": np.exp(rng.normal(2, 1, 60))})
+    b = pd.DataFrame({"t": np.exp(rng.normal(1, 1, 60))})
+    raw = table1(a, b, [{"col": "t", "tipo": "continua"}], 0.05, rng)
+    lg = table1(a, b, [{"col": "t", "tipo": "continua", "log": True}], 0.05, rng)
+    assert lg.SMD.iloc[0] == pytest.approx(1.0, abs=0.35)   # diferença de 1 DP na escala log
+    assert raw.SMD.iloc[0] != lg.SMD.iloc[0]
+
+
+def test_predictors_do_not_drive_rebalance():
+    """Um preditor com p < α não deve ser acrescentado ao emparelhamento."""
+    from selpop.pipeline import select
+    rng = np.random.default_rng(3)
+    n = 60
+    rows = []
+    for pid in range(n):
+        case = pid < 20
+        rows.append({"id": pid, "SEXO": pid % 2, "IDADE": 60 + (pid % 7), "dia": 2, "pred": (5 if case else 1) + rng.normal(0, .5),
+                     "is_case": case})
+    df = pd.DataFrame(rows)
+    cfg = {"estudo": {"semente": 1}, "dados": {"id": "id"},
+           "grupos": {"casos": {"nome": "C", "doente": "is_case"}, "controlos": {"nome": "K", "doente": "not is_case"}},
+           "emparelhamento": {"razao": 1, "etapas": [{"exato": ["SEXO"], "calibre": {"IDADE": 10}}],
+                              "reequilibrar": {"ativo": True, "max_iter": 2, "candidatas": ["pred"]}},
+           "equilibrio": {"alfa": 0.05, "variaveis": [{"col": "IDADE", "tipo": "continua"},
+                                                       {"col": "pred", "tipo": "continua", "papel": "preditor"}]}}
+    R = select(cfg, df, pd.DataFrame(), [])
+    assert len(R["iters"]) == 1                                   # não houve reequilíbrio
+    assert "pred" not in R["spec_used"]["etapas"][0]["calibre"]
+    row = R["t_after"][R["t_after"]["Variável"] == "pred"].iloc[0]
+    assert row.p < 0.05 and row.Papel.startswith("Preditor")
+
+
+def _toy_result():
+    from selpop.pipeline import select
+    rng = np.random.default_rng(5)
+    rows = [{"id": i, "amostra_n": f"A{i}", "data": pd.Timestamp("2021-01-01"), "SEXO": i % 2, "IDADE": 50 + i % 9,
+             "DIABETES": int(i % 3 == 0), "x": rng.normal(1, .3), "is_case": i < 15} for i in range(45)]
+    df = pd.DataFrame(rows)
+    cfg = {"estudo": {"semente": 1, "nome": "toy"}, "dados": {"id": "id"},
+           "colunas": {"n_amostra": "amostra_n", "data_colheita": "data"},
+           "grupos": {"casos": {"nome": "Casos", "nome_en": "cases", "doente": "is_case"},
+                      "controlos": {"nome": "Controlos", "nome_en": "controls", "doente": "not is_case"}},
+           "emparelhamento": {"razao": 2, "etapas": [{"exato": ["SEXO"], "calibre": {"IDADE": 10}}]},
+           "equilibrio": {"alfa": 0.05, "variaveis": [
+               {"col": "IDADE", "tipo": "continua"},
+               {"col": "SEXO", "tipo": "categorica", "rotulos": {0: "Masculino", 1: "Feminino"}},
+               {"col": "DIABETES", "tipo": "categorica", "rotulos": {0: "Não", 1: "Sim"}},
+               {"col": "x", "nome": "Marcador X", "nome_en": "Marker X", "tipo": "continua", "papel": "preditor"}]}}
+    return select(cfg, df, pd.DataFrame(), [{"ficheiro": "toy", "folha": "0", "linhas": 45, "sha256": "0" * 64}])
+
+
+def test_publication_table_and_docx(tmp_path):
+    from selpop.publish import build_table, write_docx
+    R = _toy_result()
+    t, meta = build_table(R, "en")
+    assert meta["col_a"].startswith("Cases (n = ") and "Controls" in meta["col_b"]
+    labels = t["Variável"].tolist()
+    assert "Demographics" in labels and "Sex — Female, n (%)" in labels and "Diabetes mellitus, n (%)" in labels
+    assert "Candidate predictors (not used for matching)" in labels
+    assert any(n.startswith("Controls were matched to cases (2:1) on sex") for n in meta["notes"])
+    p = write_docx(R, tmp_path / "t1.docx")
+    from docx import Document
+    doc = Document(p)
+    assert len(doc.tables) == 1 and doc.tables[0].rows[0].cells[0].text == "Variable"
+
+
+def test_sav_roundtrip(tmp_path):
+    import pyreadstat
+    from selpop.publish import write_sav, write_sps
+    R = _toy_result()
+    p = write_sav(R, tmp_path / "d.sav")
+    d, m = pyreadstat.read_sav(str(p))
+    assert len(d) == len(R["sel_cases"]) + len(R["sel_ctrl"])
+    assert set(d["grupo"]) == {0, 1} and m.variable_value_labels["SEXO"] == {0.0: "Male", 1.0: "Female"}
+    assert m.column_names_to_labels["x"] == "Marker X"
+    sps = write_sps(R, tmp_path / "v.sps", "d.sav").read_text()
+    assert "NPAR TESTS" in sps or "T-TEST" in sps
+    assert "CROSSTABS" in sps and "/STATISTICS=CHISQ" in sps

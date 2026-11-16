@@ -20,7 +20,8 @@ import yaml
 from selpop import __version__
 from selpop.cohort import q
 from selpop.io import load_sources
-from selpop.pipeline import prepare, select
+from selpop.pipeline import prep_key_of, prepare, select
+from selpop.publish import TXT as TXT_PUB, build_table, write_docx, write_sav, write_sps
 from selpop.report import write
 
 ROOT = Path(__file__).parent
@@ -99,8 +100,9 @@ def txt_to_labels(t: str) -> dict | None:
 
 def vars_to_df(vs) -> pd.DataFrame:
     return pd.DataFrame([{"Coluna": v["col"], "Nome": v.get("nome", v["col"]), "Tipo": v.get("tipo", "continua"),
-                          "Testar": bool(v.get("testar", True)), "Rótulos": labels_to_txt(v.get("rotulos"))} for v in vs],
-                        columns=["Coluna", "Nome", "Tipo", "Testar", "Rótulos"])
+                          "Papel": v.get("papel", "confundidor"), "Testar": bool(v.get("testar", True)),
+                          "Log (SMD)": bool(v.get("log", False)), "Rótulos": labels_to_txt(v.get("rotulos"))} for v in vs],
+                        columns=["Coluna", "Nome", "Tipo", "Papel", "Testar", "Log (SMD)", "Rótulos"])
 
 
 def df_to_vars(d: pd.DataFrame) -> list[dict]:
@@ -112,6 +114,10 @@ def df_to_vars(d: pd.DataFrame) -> list[dict]:
         v = {"col": col, "nome": str(r.get("Nome") or col), "tipo": r.get("Tipo") or "continua"}
         if not bool(r.get("Testar", True)):
             v["testar"] = False
+        if r.get("Papel") and r.get("Papel") != "confundidor":
+            v["papel"] = r.get("Papel")
+        if bool(r.get("Log (SMD)", False)):
+            v["log"] = True
         lab = txt_to_labels(r.get("Rótulos"))
         if lab:
             v["rotulos"] = lab
@@ -135,7 +141,7 @@ def load_template(cfg: dict):
 
 def prep_key(cfg: dict) -> str:
     """Só estas partes da configuração afetam a preparação da base (o resto pode mudar sem recalcular)."""
-    return yaml.safe_dump({k: cfg.get(k) for k in ("dados", "colunas", "lra", "derivados")}, sort_keys=True, allow_unicode=True)
+    return prep_key_of(cfg)
 
 
 @st.cache_data(show_spinner="A preparar a base (variáveis derivadas, LRA, TFGe)…", max_entries=4)
@@ -145,6 +151,25 @@ def cached_prepare(main_name: str, main_bytes: bytes, aux: tuple, key_yaml: str)
     raw, prov = load_sources(cfg, (main_name, main_bytes), aux_srcs)
     df, qc = prepare(cfg, raw)
     return df, qc, prov
+
+
+def _tmp_bytes(fn, suffix: str) -> bytes:
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / f"out{suffix}"
+        fn(p)
+        return p.read_bytes()
+
+
+def docx_bytes(R, lang, smd) -> bytes:
+    return _tmp_bytes(lambda p: write_docx(R, p, lang=lang, smd=smd), ".docx")
+
+
+def sav_bytes(R, lang) -> bytes:
+    return _tmp_bytes(lambda p: write_sav(R, p, lang=lang), ".sav")
+
+
+def sps_bytes(R, sav_name, lang) -> bytes:
+    return _tmp_bytes(lambda p: write_sps(R, p, sav_name, lang=lang), ".sps")
 
 
 def excel_bytes(R) -> bytes:
@@ -323,6 +348,10 @@ with tabs[2]:
                              column_config={"Coluna": st.column_config.SelectboxColumn(options=cols_all, width="medium"),
                                             "Tipo": st.column_config.SelectboxColumn(options=["continua", "categorica"], width="small"),
                                             "Testar": st.column_config.CheckboxColumn(width="small"),
+                                            "Papel": st.column_config.SelectboxColumn(
+                                                options=["confundidor", "preditor", "interferente"], width="small",
+                                                help="Só os confundidores contam para o reequilíbrio; preditores e interferentes são testados mas não emparelhados."),
+                                            "Log (SMD)": st.column_config.CheckboxColumn(width="small", help="SMD em escala log (variáveis muito assimétricas)"),
                                             "Nome": st.column_config.TextColumn(width="medium"),
                                             "Rótulos": st.column_config.TextColumn(width="medium")})
 
@@ -400,7 +429,7 @@ with tabs[3]:
             st.warning("A configuração mudou desde a última execução. Os resultados abaixo são da execução anterior.")
         names = R["names"]
         t = R["t_after"]
-        nsig = int((t["Diferença significativa"] == "Sim").sum())
+        nsig = int(((t["Diferença significativa"] == "Sim") & t["Papel"].astype(str).str.startswith("Confundidor")).sum())
         m = R["match"]
         nsup_n = int((m.papel == "suplente").sum()) if len(m) else 0
         unmatched = len(R["cases"]) - R["sel_cases"][idc].nunique() if cfg_now["emparelhamento"] else 0
@@ -409,13 +438,38 @@ with tabs[3]:
         k2.metric(f"{names[1]} (principais)", len(R["sel_ctrl"]))
         k3.metric("Suplentes", nsup_n)
         k4.metric("Casos sem controlo", unmatched)
-        k5.metric(f"Variáveis com p < {R['meta']['alfa']}", nsig)
+        k5.metric(f"Confundidores com p < {R['meta']['alfa']}", nsig,
+                  help="Preditores candidatos e interferentes são testados mas não contam: não se emparelham.")
 
         d1, d2 = st.columns(2)
         d1.download_button("Descarregar Excel completo", excel_bytes(R), file_name=f"selecao_{tname}.xlsx",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
         d2.download_button("Descarregar configuração (YAML)", ss.R_cfg_yaml.encode("utf-8"), file_name=f"{tname}_config.yaml",
                            help="Guardar com o Excel: permite reproduzir exatamente esta seleção.")
+
+        st.subheader("Para o artigo e para validação externa")
+        o1, o2 = st.columns([1, 3])
+        lang = o1.radio("Língua", ["en", "pt"], horizontal=True, format_func=lambda x: {"en": "Inglês", "pt": "Português"}[x], key="pub_lang")
+        with_smd = o1.checkbox("Incluir coluna SMD", value=False, key="pub_smd")
+        o2.caption("**Tabela 1 (Word)**: pronta para o artigo — secções, mediana [IIQ] ou n (%), p com a letra do teste e notas de rodapé. "
+                   "**Dados (.sav)**: as amostras selecionadas com rótulos de variáveis e valores; abre no SPSS, PSPP, jamovi e JASP. "
+                   "**Sintaxe (.sps)**: reproduz no SPSS/PSPP os testes da Tabela 1 (comparar com 'Pearson Chi-Square' e "
+                   "'Equal variances assumed'; para variáveis com mais de 2 categorias o SelPop usa Fisher Monte Carlo).")
+        b1, b2, b3 = st.columns(3)
+        b1.download_button("Tabela 1 (Word)", docx_bytes(R, lang, with_smd), file_name=f"Table1_{tname}_{lang}.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        sav_name = f"{tname}.sav"
+        b2.download_button("Dados (.sav)", sav_bytes(R, lang), file_name=sav_name, mime="application/octet-stream")
+        b3.download_button("Sintaxe de validação (.sps)", sps_bytes(R, sav_name, lang), file_name=f"{tname}_validacao.sps", mime="text/plain")
+        with st.expander("Pré-visualizar a Tabela 1 de publicação"):
+            pub, pmeta = build_table(R, lang, with_smd)
+            st.markdown(f"**{pmeta['title']}**")
+            prev = pub.rename(columns={"Variável": TXT_PUB[lang]["var"], "casos": pmeta["col_a"], "controlos": pmeta["col_b"]})
+            prev[TXT_PUB[lang]["var"]] = [("    " if t == "nivel" else "") + v for t, v in zip(pub["tipo"], pub["Variável"])]
+            prev["p"] = [f"{p}{('' if not isinstance(k, str) else ' ' + k)}" for p, k in zip(pub["p"], pub["teste"])]
+            st.dataframe(prev.drop(columns=["tipo", "teste"]), hide_index=True, width="stretch", height=480)
+            for n in pmeta["notes"]:
+                st.caption(n)
 
         st.subheader("Tabela 1 (após emparelhamento)")
         pnum = pd.to_numeric(t["p"], errors="coerce")
@@ -440,7 +494,7 @@ with tabs[3]:
         with f2:
             if len(R["iters"]):
                 st.subheader("Reequilíbrio")
-                st.dataframe(R["iters"][["Iteração", "Casos emparelhados", "Variáveis com p < α", "Escolhida"]],
+                st.dataframe(R["iters"][["Iteração", "Casos emparelhados", "Confundidores com p < α", "Escolhida"]],
                              hide_index=True, width="stretch")
         st.subheader("Amostras selecionadas")
         cmap = cfg_now["colunas"]
