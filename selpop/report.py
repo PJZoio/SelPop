@@ -20,7 +20,7 @@ METODOS = [
     ("Objetivo", "Selecionar, de forma reprodutível, a população-alvo (casos) e os controlos a partir da base, com o dia/amostra-índice de cada doente, e documentar o equilíbrio entre grupos."),
     ("Pipeline", "1) carregar base e ficheiros auxiliares; 2) derivar variáveis por dia e por doente; 3) aplicar critérios de doente e de dia a cada grupo; 4) escolher o dia-índice dos casos; 5) emparelhar controlos por etapas; 6) Tabela 1 com testes e SMD; 7) opcionalmente reequilibrar acrescentando ao emparelhamento a variável com menor p; 8) exportar."),
     ("Emparelhamento", "Guloso global sem reposição: todos os pares caso–(doente-dia controlo) admissíveis (igualdade nas variáveis 'exato', diferença ≤ calibre nas restantes) ordenados por custo = Σ|diferença|/calibre, com desempate aleatório reprodutível (semente). Cada doente-controlo é usado uma vez. Casos que não completam a razão passam à etapa seguinte, mais permissiva. Os primeiros controlos de cada caso (até à razão) são 'principais'; os seguintes são 'suplentes'."),
-    ("Testes (como nos artigos do grupo)", "Contínuas: mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student se ambos normais, senão Mann–Whitney U. Categóricas: n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Bilateral; α definido na configuração. Sem correção para comparações múltiplas (Tabela 1 descritiva)."),
+    ("Testes (como nos artigos do grupo)", "Contínuas: mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student (variâncias iguais) se ambos normais, senão Mann–Whitney U (aproximação normal com correção de empates, sem correção de continuidade, como no SPSS/PSPP). Categóricas: n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Bilateral; α definido na configuração. Sem correção para comparações múltiplas (Tabela 1 descritiva)."),
     ("SMD", "Diferença média padronizada (para categóricas com >2 níveis, o maior |SMD| entre níveis). Não depende de n: com grupos pequenos, 'p ≥ α' não demonstra equilíbrio, e o SMD ajuda a ver diferenças relevantes que o teste não deteta. Referência habitual: |SMD| < 0,1."),
     ("TFGe", "CKD-EPI 2021 sem coeficiente de raça. Em UCI a creatinina não está em estado estacionário e a perda muscular sobrestima a TFGe: usar como descritiva. 'tfge_basal_proxy' usa a creatinina mínima do internamento."),
     ("LRA (KDIGO, critério de creatinina)", "Subida: creatinina máx. do dia ≥1,5× o mínimo dos 7 dias anteriores (incl. o dia) ou ≥0,3 mg/dL acima do mínimo das 48 h anteriores. Presente na admissão: nos primeiros dias, creatinina ≥1,5× o nadir dos 7 dias seguintes. Estádio 1/2/3 pelo rácio face ao basal (1,5–1,9 / 2,0–2,9 / ≥3,0 ou ≥4,0 mg/dL). Aproximação: não há débito urinário nem creatinina pré-admissão; comparações entre valores diários."),
@@ -82,7 +82,7 @@ def _base(r, idc, c, cols):
     return d
 
 
-def write(R: dict, out_path: str | Path):
+def write(R: dict, out_path: str | Path, pub_lang: str = "en"):
     out_path = Path(out_path)
     cfg, meta = R["cfg"], R["meta"]
     names = R["names"]
@@ -166,5 +166,8 @@ def write(R: dict, out_path: str | Path):
         if name in wb.sheetnames:
             _style(wb[name], widths={"A": 12, "B": 14, "C": 16, "D": 40, "E": 12, "F": 70, "G": 10}, wrap=("D", "F"))
     _style(wb["Config"], widths={"A": 120})
+    from .publish import write_pub_sheet
+    ws = write_pub_sheet(wb, "Table1_publication", R, lang=pub_lang, smd=True)
+    wb.move_sheet(ws, offset=-(len(wb.sheetnames) - 1 - wb.sheetnames.index("Tabela1") - 1))
     wb.save(out_path)
     return {"selecao": len(sel), "suplentes": len(sup), "casos_sem_controlo": len(unmatched)}

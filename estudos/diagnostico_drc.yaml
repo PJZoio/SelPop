@@ -69,6 +69,7 @@ derivados:
 grupos:
   casos:
     nome: "DRC (casos)"
+    nome_en: "patients with CKD"
     doente:
       - {nome: "DRC registada", expr: "DRC"}
       - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
@@ -80,6 +81,7 @@ grupos:
     indice: {regra: primeiro}
   controlos:
     nome: "Sem doença renal (controlos)"
+    nome_en: "controls without kidney disease"
     doente:
       - {nome: "Sem DRC registada", expr: "not DRC"}
       - {nome: "Não transplantado", expr: "TRANSPLANTADO == 0"}
@@ -109,8 +111,12 @@ equilibrio:
     - {col: SEXO, nome: "Sexo", tipo: categorica, rotulos: {0: Masculino, 1: Feminino}}
     - {col: IMC, nome: "IMC (kg/m²)", tipo: continua}
     - {col: COVID, nome: "COVID-19", tipo: categorica, rotulos: {0: Não, 1: Sim}}
-    - {col: VAGA, nome: "Vaga epidémica", tipo: categorica}
-    - {col: MOTIVO_ADMISSAO, nome: "Motivo de admissão (código)", tipo: categorica}
+    - {col: VAGA, nome: "Vaga epidémica", tipo: categorica,
+       rotulos: {1: 1.ª vaga, 2: 2.ª vaga, 3: 3.ª vaga, 4: 4.ª vaga, 5: 5.ª vaga, 6: 6.ª vaga},
+       rotulos_en: {1: Wave 1, 2: Wave 2, 3: Wave 3, 4: Wave 4, 5: Wave 5, 6: Wave 6}}
+    - {col: MOTIVO_ADMISSAO, nome: "Motivo de admissão", tipo: categorica,
+       rotulos: {1: Insuficiência respiratória aguda, 2: Cirúrgico urgente, 3: EAM, 4: AVC, 5: Choque séptico, 6: Alterações do ritmo cardíaco, 7: Síndrome de Guillain-Barré, 8: Insuficiência renal, 9: Outros},
+       rotulos_en: {1: Acute respiratory failure, 2: Urgent surgery, 3: Acute myocardial infarction, 4: Stroke, 5: Septic shock, 6: Cardiac arrhythmia, 7: Guillain–Barré syndrome, 8: Kidney failure, 9: Other}}
     # --- comorbilidades
     - {col: COMORBILIDADES, nome: "Alguma comorbilidade", tipo: categorica, rotulos: {0: Não, 1: Sim}}
     - {col: HTA, nome: "Hipertensão arterial", tipo: categorica, rotulos: {0: Não, 1: Sim}}

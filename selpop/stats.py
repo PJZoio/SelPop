@@ -43,7 +43,7 @@ def comparar_continua(a, b, alpha_normal=0.05):
     normal = all(len(x) >= 3 and np.ptp(x) > 0 and st.shapiro(x).pvalue > alpha_normal for x in (a, b))
     if normal:
         return st.ttest_ind(a, b, equal_var=True).pvalue, "t de Student"
-    return st.mannwhitneyu(a, b, alternative="two-sided").pvalue, "Mann–Whitney U"
+    return st.mannwhitneyu(a, b, alternative="two-sided", method="asymptotic", use_continuity=False).pvalue, "Mann–Whitney U"  # como SPSS/PSPP
 
 
 def comparar_categorica(tab: np.ndarray, rng: np.random.Generator):

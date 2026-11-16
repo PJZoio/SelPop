@@ -21,6 +21,7 @@ from selpop import __version__
 from selpop.cohort import q
 from selpop.io import load_sources
 from selpop.pipeline import prep_key_of, prepare, select
+from selpop.publish import TXT as TXT_PUB, build_table, write_docx, write_sav, write_sps
 from selpop.report import write
 
 ROOT = Path(__file__).parent
@@ -150,6 +151,25 @@ def cached_prepare(main_name: str, main_bytes: bytes, aux: tuple, key_yaml: str)
     raw, prov = load_sources(cfg, (main_name, main_bytes), aux_srcs)
     df, qc = prepare(cfg, raw)
     return df, qc, prov
+
+
+def _tmp_bytes(fn, suffix: str) -> bytes:
+    with tempfile.TemporaryDirectory() as d:
+        p = Path(d) / f"out{suffix}"
+        fn(p)
+        return p.read_bytes()
+
+
+def docx_bytes(R, lang, smd) -> bytes:
+    return _tmp_bytes(lambda p: write_docx(R, p, lang=lang, smd=smd), ".docx")
+
+
+def sav_bytes(R, lang) -> bytes:
+    return _tmp_bytes(lambda p: write_sav(R, p, lang=lang), ".sav")
+
+
+def sps_bytes(R, sav_name, lang) -> bytes:
+    return _tmp_bytes(lambda p: write_sps(R, p, sav_name, lang=lang), ".sps")
 
 
 def excel_bytes(R) -> bytes:
@@ -426,6 +446,30 @@ with tabs[3]:
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet", type="primary")
         d2.download_button("Descarregar configuração (YAML)", ss.R_cfg_yaml.encode("utf-8"), file_name=f"{tname}_config.yaml",
                            help="Guardar com o Excel: permite reproduzir exatamente esta seleção.")
+
+        st.subheader("Para o artigo e para validação externa")
+        o1, o2 = st.columns([1, 3])
+        lang = o1.radio("Língua", ["en", "pt"], horizontal=True, format_func=lambda x: {"en": "Inglês", "pt": "Português"}[x], key="pub_lang")
+        with_smd = o1.checkbox("Incluir coluna SMD", value=False, key="pub_smd")
+        o2.caption("**Tabela 1 (Word)**: pronta para o artigo — secções, mediana [IIQ] ou n (%), p com a letra do teste e notas de rodapé. "
+                   "**Dados (.sav)**: as amostras selecionadas com rótulos de variáveis e valores; abre no SPSS, PSPP, jamovi e JASP. "
+                   "**Sintaxe (.sps)**: reproduz no SPSS/PSPP os testes da Tabela 1 (comparar com 'Pearson Chi-Square' e "
+                   "'Equal variances assumed'; para variáveis com mais de 2 categorias o SelPop usa Fisher Monte Carlo).")
+        b1, b2, b3 = st.columns(3)
+        b1.download_button("Tabela 1 (Word)", docx_bytes(R, lang, with_smd), file_name=f"Table1_{tname}_{lang}.docx",
+                           mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
+        sav_name = f"{tname}.sav"
+        b2.download_button("Dados (.sav)", sav_bytes(R, lang), file_name=sav_name, mime="application/octet-stream")
+        b3.download_button("Sintaxe de validação (.sps)", sps_bytes(R, sav_name, lang), file_name=f"{tname}_validacao.sps", mime="text/plain")
+        with st.expander("Pré-visualizar a Tabela 1 de publicação"):
+            pub, pmeta = build_table(R, lang, with_smd)
+            st.markdown(f"**{pmeta['title']}**")
+            prev = pub.rename(columns={"Variável": TXT_PUB[lang]["var"], "casos": pmeta["col_a"], "controlos": pmeta["col_b"]})
+            prev[TXT_PUB[lang]["var"]] = [("    " if t == "nivel" else "") + v for t, v in zip(pub["tipo"], pub["Variável"])]
+            prev["p"] = [f"{p}{('' if not isinstance(k, str) else ' ' + k)}" for p, k in zip(pub["p"], pub["teste"])]
+            st.dataframe(prev.drop(columns=["tipo", "teste"]), hide_index=True, width="stretch", height=480)
+            for n in pmeta["notes"]:
+                st.caption(n)
 
         st.subheader("Tabela 1 (após emparelhamento)")
         pnum = pd.to_numeric(t["p"], errors="coerce")

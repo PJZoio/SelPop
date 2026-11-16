@@ -72,6 +72,26 @@ Suplentes e Configuração.
 | M2 | `diagnostico_lra.yaml` | Os mesmos doentes; amostra no dia de início (ou seguinte) | Re-emparelhados no dia equivalente |
 | M3 | `diagnostico_drc.yaml` | DRC em dia estável (sem LRA ±2 dias) | Sem DRC, sem LRA, TFGe basal ≥60 |
 
+## Tabela 1 para o artigo e validação em SPSS/PSPP/jamovi
+
+Com `--publicacao` e `--sav` (linha de comandos ou consolidado) ou pelos botões do separador **Resultados**:
+
+- **Tabela 1 em Word** (`*_Table1_en.docx`; `--lingua pt` para português): secções (demografia, comorbilidades,
+  internamento, preditores, laboratório, desfechos), mediana [IIQ] ou n (%), n de cada grupo no cabeçalho, p com a
+  letra do teste e notas de rodapé (testes, critérios de emparelhamento, dados em falta). Também fica no Excel
+  (folha `Table1_publication` / `Mx_Table1_pub`). Nomes em inglês por omissão para as variáveis da base; a
+  configuração pode sobrepor com `nome_en`, `rotulos_en` e `secao`, e os grupos com `nome_en`.
+- **Dados em SPSS** (`*.sav`): amostras selecionadas (casos e controlos principais), variável `grupo` (1 = caso),
+  `conjunto` (ID do caso emparelhado) e as variáveis da Tabela 1, com rótulos de variáveis e de valores.
+  Abre no SPSS, PSPP, jamovi e JASP.
+- **Sintaxe de validação** (`*_validacao.sps`): `NPAR TESTS /M-W`, `T-TEST` e `CROSSTABS /STATISTICS=CHISQ` para
+  as mesmas variáveis. No SPSS/PSPP, comparar com a linha *Equal variances assumed* (t), *Pearson Chi-Square*
+  (sem correção de Yates) ou *Fisher's Exact Test* (2×2).
+
+Validação feita com o PSPP 2.0 nos três modelos: **71/71 testes com p idêntico** ao SelPop. As únicas diferenças
+são as variáveis com mais de 2 categorias (vaga, motivo de admissão), em que o SelPop usa Fisher (Monte Carlo) e o
+PSPP só oferece o qui-quadrado de Pearson.
+
 ## Papéis das variáveis na Tabela 1
 
 Cada variável tem um `papel`:
@@ -177,7 +197,7 @@ coluna da base (com acentos ou espaços, entre acentos graves: `` `SOFA total` >
 ## Métodos
 
 - **Testes** (Fonseca et al., *Comput Biol Med* 2025; Araújo et al., *Metabolites* 2025): contínuas em
-  mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student se ambos normais, senão Mann–Whitney U.
+  mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student (variâncias iguais) se ambos normais, senão Mann–Whitney U (aproximação normal com correção de empates, sem correção de continuidade — como o SPSS/PSPP).
   Categóricas em n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Em tabelas maiores que 2×2, o p de Fisher é estimado por Monte Carlo (9 999 reamostragens, semente fixa), para ser reprodutível.
   Bilateral, α configurável, sem correção para comparações múltiplas.
 - **SMD**: acrescentado porque "p ≥ α" com grupos pequenos não demonstra equilíbrio. |SMD| < 0,1 é o
