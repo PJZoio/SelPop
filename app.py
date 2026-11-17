@@ -18,13 +18,32 @@ import streamlit as st
 import yaml
 from scipy import stats as sps
 
-from selpop import __version__
-from selpop.cohort import q
-from selpop.io import load_sources
-from selpop.pipeline import prep_key_of, prepare, select
-from selpop.publish import TXT as TXT_PUB, build_table, write_docx, write_sav, write_sps
-from selpop.report import write
-from selpop.stats import TESTES_CATEGORICA, TESTES_CONTINUA, explorar, inferir_tipo
+
+def _purge_stale_selpop() -> str:
+    """Depois de uma atualização (ex.: merge no GitHub), o Streamlit Cloud volta a correr o app.py novo mas mantém em
+    memória os módulos antigos de `selpop/`, o que dá ImportError. Se o código em disco mudou, esquecem-se os módulos
+    carregados para que os imports seguintes leiam a versão nova."""
+    import hashlib
+    import sys
+    src = hashlib.sha256(b"".join(p.read_bytes() for p in sorted((Path(__file__).parent / "selpop").glob("*.py")))).hexdigest()
+    mod = sys.modules.get("selpop")
+    if mod is not None and getattr(mod, "_src_hash", None) != src:
+        for name in [n for n in sys.modules if n == "selpop" or n.startswith("selpop.")]:
+            del sys.modules[name]
+    return src
+
+
+_SRC_HASH = _purge_stale_selpop()
+import selpop  # noqa: E402
+
+selpop._src_hash = _SRC_HASH
+from selpop import __version__  # noqa: E402
+from selpop.cohort import q  # noqa: E402
+from selpop.io import load_sources  # noqa: E402
+from selpop.pipeline import prep_key_of, prepare, select  # noqa: E402
+from selpop.publish import TXT as TXT_PUB, build_table, write_docx, write_sav, write_sps  # noqa: E402
+from selpop.report import write  # noqa: E402
+from selpop.stats import TESTES_CATEGORICA, TESTES_CONTINUA, explorar, inferir_tipo  # noqa: E402
 
 ROOT = Path(__file__).parent
 TEMPLATES = {p.stem: p for p in sorted((ROOT / "estudos").glob("*.yaml"))}
