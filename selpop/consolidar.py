@@ -95,7 +95,7 @@ def variables(Rs, labels) -> pd.DataFrame:
                 if col not in names:
                     names[col] = col
                     order.append(col)
-                d[col] = f"Emparelhamento ({r}); não está na Tabela 1"
+                d[col] = f"Emparelhamento ({r}); não está na tabela de comparação"
         per[lab] = d
     rows = [{"Variável": names[c], "Coluna": c, **{lab: per[lab].get(c, "—") for lab in labels}} for c in order]
     return pd.DataFrame(rows)
@@ -136,7 +136,7 @@ def write_many(Rs, labels, out_path: Path, intro: list[tuple[str, str]] | None =
     S, V, P = summary(Rs, labels), variables(Rs, labels), request_list(Rs, labels)
     meta = Rs[0]["meta"]
     leia = [("Objetivo", "Seleção das amostras do biobanco UCI a medir no miniNIR (e FT-NIR) para os modelos abaixo, "
-                         "com os respetivos controlos, a Tabela 1 de cada modelo e a lista única de amostras a pedir.")]
+                         "com os respetivos controlos, a tabela de comparação de cada modelo e a lista única de amostras a pedir.")]
     if intro is None:
         intro = []
         for lab, R in zip(labels, Rs):
@@ -149,7 +149,7 @@ def write_many(Rs, labels, out_path: Path, intro: list[tuple[str, str]] | None =
     for p in meta["proveniencia"]:
         leia.append(("Ficheiro de entrada", f"{p['ficheiro']} [{p['linhas']} linhas] SHA-256 {p['sha256'][:16]}… {p.get('nota', '')}"))
     leia.append(("Folhas", "Resumo · Variaveis (papel de cada variável em cada modelo) · Pedido_biobanco (amostras únicas, "
-                           "por prioridade) · Qualidade_dados · por modelo: Mx_Funil, Mx_Tabela1, Mx_Table1_pub (pronta para o artigo), Mx_Selecao, Mx_Suplentes, Mx_Config"))
+                           "por prioridade) · Qualidade_dados · por modelo: Mx_Funil, Mx_Comparacao, Mx_Publicacao (pronta para o artigo), Mx_Selecao, Mx_Suplentes, Mx_Config"))
     leia.append(("Papéis das variáveis", "Confundidor: deve estar equilibrado entre grupos (conta para o reequilíbrio). "
                                          "Preditor candidato: testado mas NÃO emparelhado — emparelhar anularia o sinal a estudar. "
                                          "Interferente analítico: pode alterar o espetro NIR (hemólise, bilirrubina, lesão muscular); monitorizar. "
@@ -166,7 +166,7 @@ def write_many(Rs, labels, out_path: Path, intro: list[tuple[str, str]] | None =
             Rs[0]["qc"].to_excel(xw, sheet_name="Qualidade_dados", index=False)
             for lab, R in zip(labels, Rs):
                 R["funil"].to_excel(xw, sheet_name=f"{lab}_Funil", index=False)
-                R["t_after"].to_excel(xw, sheet_name=f"{lab}_Tabela1", index=False, startrow=2)
+                R["t_after"].to_excel(xw, sheet_name=f"{lab}_Comparacao", index=False, startrow=2)
                 _sel_rows(R, "principal").to_excel(xw, sheet_name=f"{lab}_Selecao", index=False)
                 sup = _sel_rows(R, "suplente")
                 (sup if len(sup) else pd.DataFrame({"Nota": ["Sem suplentes"]})).to_excel(xw, sheet_name=f"{lab}_Suplentes", index=False)
@@ -199,7 +199,7 @@ def write_many(Rs, labels, out_path: Path, intro: list[tuple[str, str]] | None =
     _style(wb["Qualidade_dados"], widths={"A": 48, "B": 12, "C": 100}, wrap=("C",))
     for lab, R in zip(labels, Rs):
         _style(wb[f"{lab}_Funil"], widths={"A": 26, "B": 80, "C": 10, "D": 14}, wrap=("B",))
-        ws = wb[f"{lab}_Tabela1"]
+        ws = wb[f"{lab}_Comparacao"]
         ws["A1"] = f"{lab} — {R['meta']['estudo']}: {R['names'][0]} vs {R['names'][1]} (após emparelhamento). α = {R['meta']['alfa']}"
         ws["A1"].font = Font(name=F, bold=True, size=12, color="1F3864")
         _style(ws, header_row=3, widths={"A": 40, "B": 18, "C": 19, "D": 19, "E": 16, "F": 8, "G": 8, "H": 11, "I": 30, "J": 11, "K": 11})
@@ -228,8 +228,8 @@ def write_many(Rs, labels, out_path: Path, intro: list[tuple[str, str]] | None =
                         ws.cell(r, hh.index(k) + 1).fill = FILL_IN
         _style(wb[f"{lab}_Config"], widths={"A": 120})
         from .publish import write_pub_sheet
-        ws = write_pub_sheet(wb, f"{lab}_Table1_pub", R, lang=pub_lang, smd=True)
-        wb.move_sheet(ws, offset=wb.sheetnames.index(f"{lab}_Tabela1") + 1 - wb.sheetnames.index(ws.title))
+        ws = write_pub_sheet(wb, f"{lab}_Publicacao", R, lang=pub_lang, smd=True)
+        wb.move_sheet(ws, offset=wb.sheetnames.index(f"{lab}_Comparacao") + 1 - wb.sheetnames.index(ws.title))
     wb.save(out_path)
     return {"amostras_unicas": len(P), "por_prioridade": P["Prioridade"].value_counts().to_dict()}
 
@@ -240,8 +240,8 @@ def main(argv=None):
     ap.add_argument("configs", nargs="+")
     ap.add_argument("--rotulos", nargs="+", help="rótulos curtos (ex.: M1 M2 M3)")
     ap.add_argument("--saida", required=True)
-    ap.add_argument("--lingua", choices=["en", "pt"], default="en", help="língua da Tabela 1 de publicação (por omissão: en)")
-    ap.add_argument("--publicacao", action="store_true", help="gravar também a Tabela 1 de cada modelo em Word (.docx)")
+    ap.add_argument("--lingua", choices=["en", "pt"], default="en", help="língua da tabela de publicação (por omissão: en)")
+    ap.add_argument("--publicacao", action="store_true", help="gravar também a tabela de características de cada modelo em Word (.docx)")
     ap.add_argument("--sav", action="store_true", help="gravar também os dados de cada modelo em SPSS (.sav) + sintaxe de validação (.sps)")
     a = ap.parse_args(argv)
     paths = [Path(c).resolve() for c in a.configs]
@@ -252,7 +252,7 @@ def main(argv=None):
     from .publish import write_docx, write_sav, write_sps
     for lab, R in zip(labels, Rs):
         if a.publicacao:
-            write_docx(R, out_dir / f"{lab}_Table1_{a.lingua}.docx", lang=a.lingua)
+            write_docx(R, out_dir / f"{lab}_tabela_caracteristicas_{a.lingua}.docx", lang=a.lingua)
         if a.sav:
             write_sav(R, out_dir / f"{lab}.sav", lang=a.lingua)
             write_sps(R, out_dir / f"{lab}_validacao.sps", f"{lab}.sav", lang=a.lingua)

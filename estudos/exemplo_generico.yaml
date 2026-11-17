@@ -1,0 +1,72 @@
+# =====================================================================
+# EXEMPLO GENÉRICO (dados fictícios) — modelo para adaptar a outras bases
+# Uma linha por participante. Casos e controlos definidos pela coluna "grupo".
+# Para a sua base: mude `dados.ficheiro`, `dados.id`, o mapeamento em `colunas` (tudo opcional exceto o ID),
+# os critérios dos grupos e a lista de variáveis. Na interface tudo isto se faz sem editar este ficheiro.
+# =====================================================================
+estudo:
+  nome: "Exemplo genérico (dados fictícios)"
+  descricao: "Casos vs controlos, emparelhados por sexo e idade; base fictícia de 400 participantes."
+  semente: 2026
+
+dados:
+  ficheiro: "../exemplos/exemplo_ficticio.csv"
+  id: "id"
+
+# Mapeamento opcional: só o que existir na base. Permite calcular variáveis derivadas (ex.: TFGe).
+colunas:
+  n_amostra: "amostra"
+  data_colheita: "data_colheita"
+  idade: "idade"
+  sexo: "sexo"
+  sexo_feminino: "F"
+  creatinina: "creatinina"
+
+lra:
+  calcular: false          # dados transversais: não calcular LRA (precisa de creatinina diária)
+
+grupos:
+  casos:
+    nome: "Casos"
+    nome_en: "cases"
+    doente:
+      - {nome: "Grupo = Caso", expr: "grupo == 'Caso'"}
+  controlos:
+    nome: "Controlos"
+    nome_en: "controls"
+    doente:
+      - {nome: "Grupo = Controlo", expr: "grupo == 'Controlo'"}
+
+emparelhamento:
+  razao: 2
+  suplentes_por_caso: 1
+  casos_sem_controlo: excluir
+  etapas:
+    - {exato: [sexo], calibre: {idade: 5}}
+    - {exato: [sexo], calibre: {idade: 10}}
+  reequilibrar:
+    ativo: true
+    max_iter: 3
+    fator_calibre: 0.5
+    candidatas: [diabetes, hta, imc]
+
+equilibrio:
+  alfa: 0.05
+  variaveis:
+    - {col: idade, nome: "Idade (anos)", nome_en: "Age (years)", tipo: continua, secao: demografia}
+    - {col: sexo, nome: "Sexo", nome_en: "Sex", tipo: categorica, rotulos: {F: Feminino, M: Masculino}, secao: demografia}
+    - {col: imc, nome: "IMC (kg/m²)", nome_en: "BMI (kg/m²)", tipo: continua, secao: demografia}
+    - {col: centro, nome: "Centro", nome_en: "Centre", tipo: categorica, secao: demografia}
+    - {col: fumador, nome: "Hábitos tabágicos", nome_en: "Smoking status", tipo: categorica,
+       rotulos_en: {Nunca: Never, Ex-fumador: Former, Atual: Current}, secao: demografia}
+    - {col: diabetes, nome: "Diabetes", nome_en: "Diabetes mellitus", tipo: categorica, rotulos: {0: Não, 1: Sim}, secao: comorbilidades}
+    - {col: hta, nome: "Hipertensão arterial", nome_en: "Hypertension", tipo: categorica, rotulos: {0: Não, 1: Sim}, secao: comorbilidades}
+    - {col: creatinina, nome: "Creatinina (mg/dL)", nome_en: "Creatinine (mg/dL)", tipo: continua, papel: preditor, log: true}
+    - {col: ureia, nome: "Ureia (mg/dL)", nome_en: "Urea (mg/dL)", tipo: continua, papel: preditor}
+    - {col: albumina, nome: "Albumina (g/dL)", nome_en: "Albumin (g/dL)", tipo: continua, papel: preditor}
+    - {col: pcr, nome: "PCR (mg/dL)", nome_en: "C-reactive protein (mg/dL)", tipo: continua, papel: preditor, log: true}
+    - {col: tfge_dia, nome: "TFGe (mL/min/1,73 m²)", nome_en: "eGFR (mL/min/1.73 m²)", tipo: continua, testar: false, secao: laboratorio}
+
+saida:
+  ficheiro: "../resultados/selecao_exemplo_generico.xlsx"
+  colunas: [grupo, idade, sexo, creatinina, tfge_dia]

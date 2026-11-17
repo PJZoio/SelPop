@@ -182,3 +182,76 @@ def test_sav_roundtrip(tmp_path):
     sps = write_sps(R, tmp_path / "v.sps", "d.sav").read_text()
     assert "NPAR TESTS" in sps or "T-TEST" in sps
     assert "CROSSTABS" in sps and "/STATISTICS=CHISQ" in sps
+
+
+# ---------------------------------------------------------------- v0.5: genérico, escolha de testes
+def test_derive_minimal_mapping_one_row_per_subject():
+    from selpop.derive import derive, quality_checks
+    df = pd.DataFrame({"pid": ["a", "b", "c"], "age": [50, 60, 70], "sex": ["F", "M", "F"], "cr": [0.8, 1.0, 2.0]})
+    cfg = {"dados": {"id": "pid"}, "colunas": {"idade": "age", "sexo": "sex", "sexo_feminino": "F", "creatinina": "cr"}}
+    out = derive(df.copy(), cfg)
+    assert out["amostra"].all() and (out["dias_com_dados"] == 1).all()
+    assert "tfge_dia" in out and out.loc[out.pid == "a", "tfge_dia"].iloc[0] > 80
+    assert "lra_dia" not in out                       # sem datas, não há LRA
+    assert "Verificação" in quality_checks(out, cfg).columns
+
+
+def test_derive_only_id():
+    from selpop.derive import derive
+    out = derive(pd.DataFrame({"id": [1, 1, 2], "x": [1, 2, 3]}), {"dados": {"id": "id"}})
+    assert list(out["n_amostras_doente"]) == [2, 2, 1]
+
+
+def test_forced_tests_and_welch():
+    from selpop.stats import comparar_categorica, comparar_continua
+    rng = np.random.default_rng(1)
+    a, b = rng.normal(0, 1, 30), rng.normal(0.5, 3, 30)
+    assert comparar_continua(a, b, forced="welch")[1] == "t de Welch"
+    assert comparar_continua(a, b, forced="mw")[1] == "Mann–Whitney U"
+    assert comparar_continua(a, b, forced="t")[1] == "t de Student"
+    tab = np.array([[30, 30], [32, 28]])
+    assert comparar_categorica(tab, rng, forced="fisher")[1] == "Fisher exato"
+
+
+def test_explorar_recommendations():
+    from selpop.stats import explorar, inferir_tipo
+    rng = np.random.default_rng(2)
+    e = explorar(pd.Series(rng.exponential(1, 60)), pd.Series(rng.exponential(2, 60)), {"col": "x"})
+    assert e["_rec"] == "mw" and "Shapiro" in e["Justificação"]
+    e = explorar(pd.Series(rng.normal(0, 1, 50)), pd.Series(rng.normal(0, 1, 50)), {"col": "x"})
+    assert e["_rec"] == "t"
+    e = explorar(pd.Series([0, 1, 1, 0]), pd.Series([1, 1, 1, 0, 1]), {"col": "s", "tipo": "categorica"})
+    assert e["_rec"] == "fisher"
+    assert inferir_tipo(pd.Series(["A", "B", "A"]))[0] == "categorica"
+    assert inferir_tipo(pd.Series([0, 1, 0, 1]))[0] == "categorica"
+    assert inferir_tipo(pd.Series(rng.normal(0, 1, 50)))[0] == "continua"
+    assert "códigos" in inferir_tipo(pd.Series([1, 2, 3, 4, 5, 1, 2]))[1]
+
+
+def test_forced_test_flows_to_table_and_publication():
+    from selpop.publish import build_table
+    R = _toy_result()
+    vs = R["cfg"]["equilibrio"]["variaveis"]
+    from selpop.stats import table1
+    vs2 = [dict(v, teste="welch") if v["col"] == "IDADE" else v for v in vs]
+    t = table1(R["sel_cases"], R["sel_ctrl"], vs2, 0.05, np.random.default_rng(0))
+    assert t.loc[t["Variável"] == "IDADE", "Teste"].iloc[0] == "t de Welch"
+    R["cfg"]["equilibrio"]["variaveis"] = vs2
+    tb, meta = build_table(R, "en")
+    assert any("Welch" in n for n in meta["notes"])
+    assert not meta["title"].lower().startswith("table")     # sem numeração
+
+
+def test_example_study_end_to_end(tmp_path):
+    from pathlib import Path
+    from selpop.pipeline import load_config, run
+    from selpop.publish import write_docx, write_sav
+    from selpop.report import write
+    p = Path(__file__).resolve().parents[1] / "estudos" / "exemplo_generico.yaml"
+    R = run(load_config(p), p.parent, log=lambda *a: None)
+    assert len(R["sel_cases"]) > 30 and len(R["sel_ctrl"]) >= len(R["sel_cases"])
+    t = R["t_after"]
+    conf = t["Papel"].astype(str).str.startswith("Confundidor")
+    assert not ((t["Diferença significativa"] == "Sim") & conf).any()
+    write(R, tmp_path / "s.xlsx"); write_docx(R, tmp_path / "t.docx"); write_sav(R, tmp_path / "d.sav")
+    assert "Tabela_publicacao" in pd.ExcelFile(tmp_path / "s.xlsx").sheet_names
