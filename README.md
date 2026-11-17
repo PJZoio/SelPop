@@ -1,220 +1,175 @@
-# selpop — seleção reprodutível de populações-alvo e controlos
+# SelPop — seleção de populações e comparação de grupos
 
-Ferramenta em Python para automatizar a etapa mais demorada da preparação dos estudos com o biobanco
-da UCI: **definir casos e controlos, escolher a amostra-índice de cada doente, emparelhar e
-documentar o equilíbrio entre grupos (Tabela 1)**. Cada estudo é descrito num ficheiro YAML; o código
-não precisa de ser alterado para criar um estudo novo.
+Ferramenta em Python, com interface no browser, para:
 
-## Instalação
+1. **selecionar** a população-alvo (casos) e os controlos a partir de uma base de dados (Excel ou CSV);
+2. **emparelhar** controlos aos casos (ex.: mesmo sexo, idade ±5 anos);
+3. **escolher e aplicar os testes estatísticos** certos, com explicação passo a passo;
+4. **exportar** a lista de amostras, a tabela de características para o artigo (Word, inglês ou português) e os
+   dados para validação em SPSS, PSPP, jamovi ou JASP.
 
-Requer Python ≥ 3.10.
+Funciona com qualquer base em que cada linha seja um participante (estudo transversal) ou uma observação de um
+participante (estudo longitudinal, ex.: dias de internamento). Tudo fica registado num ficheiro de configuração
+(YAML), por isso a mesma base e a mesma configuração dão sempre a mesma seleção.
+
+---
+
+## ⚠️ Privacidade: use a aplicação no seu computador
+
+**Com dados de doentes, corra a aplicação localmente.** Assim os dados nunca saem do seu computador.
+
+- A versão publicada na nuvem (Streamlit Cloud) serve **apenas para demonstração**, com os dados de exemplo
+  fictícios incluídos. A própria aplicação avisa, no topo da página, se está a correr na nuvem.
+- Nunca coloque bases com dados de doentes no GitHub nem noutros serviços na nuvem sem autorização do
+  encarregado de proteção de dados. O `.gitignore` do projeto impede que `dados/`, `resultados/` e ficheiros
+  Excel/CSV entrem no repositório (exceto a base de exemplo fictícia em `exemplos/`).
+
+## Instalação (uma vez)
+
+1. Instalar o **Python 3.10 ou mais recente** ([python.org](https://www.python.org/downloads/); no Windows,
+   marcar *Add Python to PATH*).
+2. Descarregar o SelPop: `git clone https://github.com/PJZoio/SelPop.git` — ou, no GitHub, *Code → Download ZIP*.
+3. Na pasta do SelPop:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-## Interface gráfica
+## Utilização
 
 ```bash
 streamlit run app.py
 ```
 
-Abre no browser (http://localhost:8501). Na barra lateral escolhe-se o modelo de estudo (ou carrega-se um YAML)
-e carregam-se a base e os ficheiros auxiliares. Os separadores permitem:
+Abre no browser em `http://localhost:8501` (*localhost* = este computador). Na barra lateral escolhe-se a base
+— **Exemplo (fictícios)** para experimentar, ou **Os meus dados** — e um modelo de estudo (ou *Novo estudo em
+branco*). Depois seguem-se os passos:
 
-- **Critérios** — editar os critérios de casos e controlos (ativar/desativar, acrescentar linhas) e ver o funil
-  atualizado em tempo real; regra do dia-índice; lista das colunas disponíveis para as expressões.
-- **Emparelhamento** — razão, suplentes, etapas (exato e calibres), semente e reequilíbrio automático.
-- **Variáveis da Tabela 1** — variáveis, tipo, rótulos, quais testar; α.
-- **Resultados** — correr a seleção; Tabela 1, gráfico de equilíbrio antes/depois (SMD), funil, amostras
-  selecionadas; descarregar o Excel completo e o YAML da configuração usada.
-- **Dados** — controlo de qualidade e ficheiros carregados (com SHA-256).
-- **Configuração** — o YAML equivalente ao que está nos separadores.
+| Passo | O que se faz |
+|---|---|
+| **1 · Colunas** | Indicar a coluna do ID (obrigatória) e, se existirem, data, nº de amostra, idade, sexo e creatinina. Com estas, a ferramenta calcula variáveis derivadas (ex.: TFGe). Há campos opcionais para bases de UCI (admissão, VMI, ECMO, SOFA). |
+| **2 · Grupos** | Definir casos e controlos. O **assistente rápido** faz isto escolhendo a coluna que separa os grupos e os valores; critérios mais finos escrevem-se como expressões. O funil mostra, em tempo real, quantos participantes ficam após cada critério. |
+| **3 · Emparelhamento** | Controlos por caso, suplentes, variáveis de emparelhamento (exato e calibres) e reequilíbrio automático. |
+| **4 · Variáveis** | Variáveis a comparar, o tipo (sugerido automaticamente) e o papel de cada uma (confundidor, preditor, interferente). |
+| **5 · Escolha dos testes** | Diagnóstico de cada variável, teste recomendado com justificação, histogramas e gráficos Q–Q; possibilidade de escolher outro teste. |
+| **6 · Resultados** | Números finais, tabela para o artigo, comparação detalhada, gráfico de equilíbrio, lista de amostras e botões para descarregar. |
 
-Guardar sempre o YAML junto do Excel: com a mesma base, reproduz exatamente a mesma seleção, também na
-linha de comandos.
+### Como a ferramenta escolhe o teste (passo 5)
 
-> **Privacidade.** Os ficheiros carregados ficam só na memória da sessão. Correr a aplicação localmente.
-> Não a publicar num servidor público (Render, Streamlit Community Cloud, etc.) com dados de doentes.
-> O `.gitignore` impede que `dados/`, `resultados/` e ficheiros Excel entrem no repositório.
+1. **Tipo de variável.** Categórica (sexo, diabetes, centro) ou contínua (idade, creatinina). Uma variável
+   discreta com poucos valores pode ser categórica (códigos) ou ordinal (escala, ex.: SOFA): no segundo caso
+   trata-se como contínua com teste não paramétrico. A ferramenta sugere o tipo e avisa nos casos ambíguos.
+2. **Contínua → a distribuição é normal em cada grupo?** Teste de Shapiro–Wilk (p > 0,05 → compatível com a
+   normal), histograma e gráfico Q–Q.
+   - Normal nos dois grupos → **t de Student**; se as variâncias diferirem (Levene p < 0,05), **t de Welch**.
+   - Não normal → **Mann–Whitney U**.
+   - Avisos: com n < 15 por grupo o Shapiro–Wilk tem pouca potência; com n > 200 deteta desvios irrelevantes.
+3. **Categórica → há poucos casos por célula?** Frequências esperadas da tabela grupo × categoria.
+   - Todas ≥ 5 → **qui-quadrado de Pearson** (sem correção de Yates).
+   - Alguma < 5 → **teste exato de Fisher** (por Monte Carlo, com semente fixa, quando há mais de 2 categorias).
+
+A opção *Automático* aplica estas regras (com Student em vez de Welch, como nos artigos do grupo). Qualquer
+escolha manual fica registada na configuração (`teste:` na variável) e nas notas de rodapé da tabela.
+
+### Base de exemplo (fictícia)
+
+`exemplos/exemplo_ficticio.csv` tem 400 participantes inventados (uma linha cada), com casos propositadamente
+mais velhos e com mais diabetes e hipertensão do que os controlos. Serve para aprender a ferramenta e para
+demonstrações. A configuração `estudos/exemplo_generico.yaml` mostra o emparelhamento e o reequilíbrio em ação
+(72 → 51 casos emparelhados ao equilibrar IMC, diabetes e hipertensão). Gera-se de novo com
+`python scripts/gerar_exemplo.py`.
+
+## Adaptar a outra base
+
+Na interface não é preciso editar ficheiros: escolha *Novo estudo (em branco)*, carregue a base e siga os
+passos. No fim, descarregue o YAML (separador *Configuração*) para repetir a análise mais tarde ou na linha
+de comandos. Para começar a partir de um ficheiro, copie `estudos/exemplo_generico.yaml` e altere:
+
+- `dados.ficheiro` e `dados.id` (único campo obrigatório);
+- `colunas` — mapeamento opcional (`n_amostra`, `data_colheita`, `idade`, `sexo` + `sexo_feminino`,
+  `creatinina`; e, para UCI, `data_admissao`, `vmi_*`, `ecmo_*`, `sofa_*`, `creatinina_max/min`, …);
+- `grupos.casos` / `grupos.controlos` — critérios (expressões pandas);
+- `emparelhamento` e `equilibrio.variaveis`.
 
 ## Linha de comandos
 
 ```bash
-cd selpop
-python -m selpop estudos/prognostico_lra.yaml
-python -m selpop estudos/diagnostico_drc.yaml
-```
-
-Os dados **não vêm no pacote**. Copiar para `dados/`:
-- `Base_de_dados_Dem_PAT_SOFA_2026.xlsx` (base principal);
-- `ISEL_BMI.xlsx` (IMC por doente; opcional — retirar o bloco `auxiliares` da configuração se não existir).
-
-O resultado é um Excel em `resultados/`. Testes (dados sintéticos): `python -m pytest tests -q`.
-
-## Vários estudos num só Excel
-
-```bash
+python -m selpop estudos/exemplo_generico.yaml --publicacao --sav
 python -m selpop.consolidar estudos/prognostico_lra.yaml estudos/diagnostico_lra.yaml estudos/diagnostico_drc.yaml \
-    --rotulos M1 M2 M3 --saida resultados/Selecao_amostras_biobanco_UCI_miniNIR.xlsx
+    --rotulos M1 M2 M3 --saida resultados/Selecao_amostras.xlsx --publicacao --sav
 ```
 
-Gera um Excel com: LEIA-ME (modelos, notas de desenho, métodos), **Resumo**, **Variaveis** (papel de cada
-variável em cada modelo), **Pedido_biobanco** (lista única de amostras, por prioridade: casos, controlos
-principais, suplentes; com o uso em cada modelo), Qualidade_dados e, por modelo, Funil, Tabela 1, Seleção,
-Suplentes e Configuração.
+`--publicacao` grava a tabela de características em Word (`--lingua en|pt`, inglês por omissão); `--sav` grava
+os dados em SPSS e a sintaxe de validação. `selpop.consolidar` junta vários estudos num só Excel, com a lista
+única de amostras a pedir ao biobanco.
 
-### Modelos incluídos
+## Saídas
 
-| Rótulo | Configuração | Casos | Controlos |
-|---|---|---|---|
-| M1 | `prognostico_lra.yaml` | Sem DRC, LRA no internamento; amostra 1–3 dias antes do início | Sem DRC, sem LRA; dia de internamento equivalente |
-| M2 | `diagnostico_lra.yaml` | Os mesmos doentes; amostra no dia de início (ou seguinte) | Re-emparelhados no dia equivalente |
-| M3 | `diagnostico_drc.yaml` | DRC em dia estável (sem LRA ±2 dias) | Sem DRC, sem LRA, TFGe basal ≥60 |
+| Saída | Conteúdo |
+|---|---|
+| Excel | LEIA-ME (métodos e ficheiros de entrada com SHA-256), Funil, Qualidade_dados, Comparacao_grupos, Tabela_publicacao, Equilibrio_antes_depois, Selecao (com colunas para o biobanco), Suplentes, Casos_sem_controlo, Iteracoes, Config |
+| Word | Tabela de características: secções, mediana [IIQ] ou n (%), n por grupo, p com a letra do teste, notas de rodapé (testes, emparelhamento, dados em falta). Sem numeração: o número da tabela é dado no artigo. |
+| `.sav` | Amostras selecionadas com `grupo` (1 = caso), `conjunto` (ID do caso emparelhado) e as variáveis comparadas, com rótulos. |
+| `.sps` | Sintaxe SPSS/PSPP que repete os testes. Comparar com *Pearson Chi-Square*, *Fisher's Exact Test* e *Equal variances assumed* (ou *not assumed* para Welch). |
 
-## Tabela 1 para o artigo e validação em SPSS/PSPP/jamovi
+Validação com o PSPP 2.0 nos três estudos de UCI: **71/71 testes com p idêntico** ao SelPop (as diferenças
+ficam só nas variáveis com mais de 2 categorias, em que o PSPP não tem Fisher exato).
 
-Com `--publicacao` e `--sav` (linha de comandos ou consolidado) ou pelos botões do separador **Resultados**:
-
-- **Tabela 1 em Word** (`*_Table1_en.docx`; `--lingua pt` para português): secções (demografia, comorbilidades,
-  internamento, preditores, laboratório, desfechos), mediana [IIQ] ou n (%), n de cada grupo no cabeçalho, p com a
-  letra do teste e notas de rodapé (testes, critérios de emparelhamento, dados em falta). Também fica no Excel
-  (folha `Table1_publication` / `Mx_Table1_pub`). Nomes em inglês por omissão para as variáveis da base; a
-  configuração pode sobrepor com `nome_en`, `rotulos_en` e `secao`, e os grupos com `nome_en`.
-- **Dados em SPSS** (`*.sav`): amostras selecionadas (casos e controlos principais), variável `grupo` (1 = caso),
-  `conjunto` (ID do caso emparelhado) e as variáveis da Tabela 1, com rótulos de variáveis e de valores.
-  Abre no SPSS, PSPP, jamovi e JASP.
-- **Sintaxe de validação** (`*_validacao.sps`): `NPAR TESTS /M-W`, `T-TEST` e `CROSSTABS /STATISTICS=CHISQ` para
-  as mesmas variáveis. No SPSS/PSPP, comparar com a linha *Equal variances assumed* (t), *Pearson Chi-Square*
-  (sem correção de Yates) ou *Fisher's Exact Test* (2×2).
-
-Validação feita com o PSPP 2.0 nos três modelos: **71/71 testes com p idêntico** ao SelPop. As únicas diferenças
-são as variáveis com mais de 2 categorias (vaga, motivo de admissão), em que o SelPop usa Fisher (Monte Carlo) e o
-PSPP só oferece o qui-quadrado de Pearson.
-
-## Papéis das variáveis na Tabela 1
-
-Cada variável tem um `papel`:
+## Papéis das variáveis
 
 | Papel | Significado | Conta para o reequilíbrio? |
 |---|---|---|
 | `confundidor` (por omissão) | Deve estar equilibrado entre grupos | Sim |
-| `preditor` | Candidato a prever o desfecho (ex.: SOFA cardiovascular, troponina, lactato na LRA). Testado, **não emparelhado**: emparelhar anularia o sinal a estudar | Não |
-| `interferente` | Pode alterar o espetro NIR (LDH/hemólise, bilirrubina, CK). Monitorizar | Não |
-| `testar: false` | Descritiva (posterior à amostra ou informativa) | Não |
+| `preditor` | Candidato a explicar o desfecho: testa-se mas **não se emparelha** (emparelhar apagaria o sinal) | Não |
+| `interferente` | Pode alterar a medição (ex.: hemólise, bilirrubina) — monitorizar | Não |
+| `testar: false` | Descritiva (posterior à amostra, ex.: óbito, duração do internamento) | Não |
 
-`log: true` calcula o SMD em escala log (variáveis muito assimétricas). O bloco `aliases` dá nomes curtos e
-numéricos a colunas de laboratório com nomes longos (ex.: `troponina_dia`). Os modelos de LRA emparelham a
-gravidade pelo `sofa_nao_renal_nao_cv_dia` (SOFA sem renal nem cardiovascular), para deixar o componente
-cardiovascular livre como preditor.
+Outras opções por variável: `log: true` (SMD em escala log), `teste` (`t`, `welch`, `mw`, `chi2`, `fisher`),
+`nome_en`, `rotulos`, `rotulos_en`, `secao` (secção na tabela do artigo).
 
-## O que a ferramenta faz
+## Variáveis derivadas
 
-1. **Carrega** a base e junta ficheiros auxiliares por ID (ex.: IMC). Regista o SHA-256 de cada ficheiro.
-2. **Deriva variáveis** por dia e por doente (lista abaixo).
-3. **Aplica os critérios** de cada grupo, um a um, e regista o funil (doentes e dias após cada critério).
-4. **Escolhe o dia-índice** dos casos (regra configurável).
-5. **Emparelha controlos** por etapas: igualdade nas variáveis "exato", diferença ≤ calibre nas restantes.
-   O dia do controlo é escolhido no emparelhamento (o mais próximo do caso), ou seja, um emparelhamento
-   por marco temporal. Cada doente-controlo é usado uma vez.
-6. **Tabela 1** com os testes usados nos artigos do grupo (ver "Métodos") e com o SMD.
-7. **Reequilíbrio opcional**: se alguma variável candidata tiver p < α, acrescenta-a ao emparelhamento
-   e repete, até `max_iter`. Escolhe a iteração com menos variáveis significativas (desempate: mais casos).
-8. **Exporta** o Excel com todas as decisões registadas.
+Calculadas só se as colunas necessárias estiverem mapeadas.
 
-### Folhas do Excel de saída
-
-| Folha | Conteúdo |
-|---|---|
-| LEIA-ME | Estudo, data, semente, ficheiros de entrada (SHA-256) e métodos |
-| Funil | Doentes e dias após cada critério, por grupo |
-| Qualidade_dados | Incoerências encontradas (datas, idades, creatinina), com IDs |
-| Tabela1 | Comparação casos vs controlos após emparelhamento; linhas com p < α a laranja |
-| Equilibrio_antes_depois | p e SMD antes e depois do emparelhamento |
-| Selecao | Casos e controlos principais, com nº de amostra, conjunto emparelhado e colunas para o biobanco |
-| Suplentes | Controlos de reserva (por caso) |
-| Casos_sem_controlo | Casos elegíveis que ficaram sem controlo |
-| Iteracoes | Histórico do reequilíbrio |
-| Config | Cópia integral da configuração usada |
-
-## Configuração (YAML)
-
-```yaml
-grupos:
-  casos:
-    nome: "LRA (casos)"
-    doente:                       # critérios ao nível do doente (cumulativos, cada um aparece no funil)
-      - {nome: "Sem DRC registada", expr: "not DRC"}
-    dia:                          # critérios ao nível do dia/amostra
-      - {nome: "Dia com amostra", expr: "amostra"}
-    indice: {regra: alvo, coluna: dias_ate_lra, alvo: 2}
-  controlos: { ... }
-emparelhamento:
-  razao: 2
-  suplentes_por_caso: 1
-  etapas:
-    - {exato: [SEXO, COVID], calibre: {IDADE: 10, dias_desde_admissao: 3}}
-    - {exato: [SEXO],        calibre: {IDADE: 15, dias_desde_admissao: 5}}
-  reequilibrar: {ativo: true, max_iter: 3, fator_calibre: 0.5, candidatas: [sofa_nao_renal_dia, DIABETES]}
-equilibrio:
-  alfa: 0.05                      # 0.01 no artigo das citocinas
-  variaveis:
-    - {col: IDADE, nome: "Idade (anos)", tipo: continua}
-    - {col: SEXO, nome: "Sexo", tipo: categorica, rotulos: {0: Masculino, 1: Feminino}}
-    - {col: OBITO_UCI, nome: "Óbito na UCI", tipo: categorica, testar: false}   # só descritiva
-```
-
-As expressões usam a sintaxe do `pandas` (`and`, `or`, `not`, `==`, `>=`). Podem referir qualquer
-coluna da base (com acentos ou espaços, entre acentos graves: `` `SOFA total` >= 6 ``) ou derivada.
-
-**Regras de dia-índice:** `primeiro`, `ultimo`, `minimo`/`maximo` (de uma `coluna`), `alvo`
-(mais próximo de `alvo` numa `coluna`), `aleatorio`.
-
-**Variáveis por expressão:** bloco `derivados`, por exemplo `DRC: "INSUFICIENCIA_RENAL == 1"`.
-
-### Variáveis derivadas disponíveis
-
-| Variável | Nível | Definição |
+| Variável | Requer | Definição |
 |---|---|---|
-| `amostra` | dia | Há nº de amostra no biobanco |
-| `cr_unico`, `ur_unico` | dia | Creatinina/ureia com um só valor no dia (máx = mín) |
-| `cr_dia`, `ur_dia` | dia | Valor único do dia (vazio se houver mais do que um) |
-| `dias_desde_admissao` | dia | Data da colheita − data de admissão na UCI |
-| `em_vmi_dia`, `em_ecmo_dia` | dia | O dia está dentro do período de VMI/ECMO |
-| `dias_vmi_ate_amostra` | dia | Dias em VMI à data da colheita |
-| `sofa_total_dia`, `sofa_nao_renal_dia` | dia | SOFA total e SOFA total − SOFA renal |
-| `sofa_cv_dia`, `sofa_nao_renal_nao_cv_dia` | dia | SOFA cardiovascular; SOFA total − renal − cardiovascular |
-| `tfge_dia` | dia | CKD-EPI 2021 com a creatinina mínima do dia |
-| `lra_dia`, `lra_estadio_dia` | dia | Critério KDIGO de creatinina cumprido nesse dia, e estádio |
-| `sem_lra_janela` | dia | Sem critério de LRA nos ±k dias (`lra.janela_estavel_dias`) |
-| `dias_ate_lra` | dia | Dias até ao início da LRA (positivo = antes) |
-| `dias_obs_apos` | dia | Dias de seguimento de creatinina após esse dia |
-| `lra_subida`, `lra_admissao`, `lra_qualquer` | doente | LRA por subida no internamento / presente na admissão / qualquer |
-| `lra_inicio`, `lra_estadio_max` | doente | Data do primeiro critério; estádio máximo |
-| `tfge_basal_proxy` | doente | CKD-EPI 2021 com a creatinina mínima do internamento |
-| `duracao_uci_dias`, `dias_com_dados`, `n_amostras_doente` | doente | Duração e quantidade de dados |
+| `amostra`, `n_amostras_doente`, `dias_com_dados` | ID (e `n_amostra`) | Linha com amostra; amostras e linhas por participante |
+| `tfge_dia`, `tfge_basal_proxy` | creatinina, idade, sexo | CKD-EPI 2021 (sem raça); basal = creatinina mínima do participante |
+| `cr_unico`, `cr_dia`, `ur_unico`, `ur_dia` | creatinina/ureia (máx./mín. do dia) | Valor único no dia (referência inequívoca) |
+| `dias_desde_admissao`, `duracao_uci_dias` | datas de colheita, admissão, alta | Dias desde a admissão; duração do internamento |
+| `em_vmi_dia`, `dias_vmi_ate_amostra`, `em_ecmo_dia` | períodos de VMI/ECMO | Em VMI/ECMO no dia; dias de VMI à data da amostra |
+| `sofa_total_dia`, `sofa_nao_renal_dia`, `sofa_cv_dia`, `sofa_nao_renal_nao_cv_dia` | SOFA total, renal, cardiovascular | Componentes e subtotais do SOFA |
+| `lra_dia`, `lra_estadio_dia`, `sem_lra_janela`, `dias_ate_lra`, `dias_obs_apos`, `lra_subida`, `lra_admissao`, `lra_qualquer`, `lra_estadio_max` | datas e creatinina diária; `lra.calcular: true` | Critério de creatinina KDIGO 2012 sobre valores diários (aproximação: sem débito urinário nem creatinina pré-admissão) |
 
 ## Métodos
 
-- **Testes** (Fonseca et al., *Comput Biol Med* 2025; Araújo et al., *Metabolites* 2025): contínuas em
-  mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student (variâncias iguais) se ambos normais, senão Mann–Whitney U (aproximação normal com correção de empates, sem correção de continuidade — como o SPSS/PSPP).
-  Categóricas em n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Em tabelas maiores que 2×2, o p de Fisher é estimado por Monte Carlo (9 999 reamostragens, semente fixa), para ser reprodutível.
-  Bilateral, α configurável, sem correção para comparações múltiplas.
-- **SMD**: acrescentado porque "p ≥ α" com grupos pequenos não demonstra equilíbrio. |SMD| < 0,1 é o
-  limiar habitual; com n ≈ 30 por grupo, valores até ~0,2–0,3 são frequentes e devem ser discutidos.
-- **TFGe**: CKD-EPI 2021 sem raça. Em UCI é descritiva (a creatinina não está estável).
-- **LRA**: critério de creatinina da KDIGO 2012 sobre valores diários (subida ≥1,5× face ao mínimo de 7 dias
-  ou ≥0,3 mg/dL em 48 h; presente na admissão se ≥1,5× o nadir dos 7 dias seguintes). Sem débito urinário
-  nem creatinina pré-admissão: é uma aproximação.
-- **Emparelhamento**: guloso global sem reposição, por etapas, com desempate aleatório reprodutível.
-  Não é ótimo no sentido estrito (minimizar a distância total); para os tamanhos em causa a diferença é
-  pequena, e a transparência e a reprodutibilidade são maiores.
+- **Testes**: como no passo 5. Contínuas em mediana (P25–P75); categóricas em n (%). Mann–Whitney com
+  aproximação normal, correção de empates e sem correção de continuidade (como o SPSS/PSPP). Bilateral; α
+  configurável; sem correção para comparações múltiplas (tabela descritiva).
+- **SMD** (diferença média padronizada): não depende do tamanho da amostra — com grupos pequenos, "p ≥ α" não
+  demonstra equilíbrio. Referência: |SMD| < 0,1.
+- **Emparelhamento**: guloso global sem reposição, por etapas (exato + calibres), desempate aleatório com semente
+  fixa. Não é ótimo no sentido estrito, mas é transparente e reprodutível.
+- **Reequilíbrio**: se um confundidor candidato tiver p < α, é acrescentado ao emparelhamento (contínua →
+  calibre de 0,5 DP; categórica → exato); fica a iteração com menos confundidores diferentes.
 
 ## Limitações e cuidados
 
-- O reequilíbrio por p-valores é uma ajuda prática, não um critério científico. As variáveis de
-  emparelhamento devem ser escolhidas por plausibilidade (confundidores do sinal espetral e do desfecho).
-- Variáveis posteriores à amostra-índice (duração do internamento, óbito, LRA posterior) são consequências
-  e não confundidores: devem ser descritivas (`testar: false`), sobretudo em estudos de prognóstico.
-- Exigir controlos "sem qualquer LRA" tende a selecionar doentes menos graves. Ver o SOFA na Tabela 1.
+- O reequilíbrio por p-valores é uma ajuda prática; as variáveis de emparelhamento devem ser escolhidas por
+  plausibilidade científica.
+- Casos e controlos são tratados como amostras independentes (prática habitual numa tabela de características).
+  Análises que modelem o emparelhamento (ex.: regressão logística condicional) fazem-se à parte.
+- Exigir controlos muito "puros" (ex.: sem nenhuma LRA) tende a selecionar participantes menos graves — confirme
+  na tabela.
 - A folha Qualidade_dados não corrige nada: indica registos a confirmar na fonte.
+
+## Estrutura
+
+```
+app.py                 interface (Streamlit)
+selpop/                biblioteca: io, derive, cohort, match, stats, report, publish, consolidar, pipeline
+estudos/*.yaml         configurações (exemplo genérico; estudos de UCI)
+exemplos/              base de exemplo fictícia
+scripts/               gerar a base de exemplo
+tests/                 testes automáticos (python -m pytest tests -q)
+```

@@ -1,8 +1,8 @@
 """Saídas para publicação e para validação externa.
 
-- Tabela 1 pronta para artigo (inglês por omissão; português opcional), em Word (.docx) e como DataFrame.
+- Tabela de características pronta para artigo (inglês por omissão; português opcional), em Word (.docx) e como DataFrame.
 - Dados das amostras selecionadas em SPSS (.sav), com rótulos de variáveis e de valores
-  (abre no SPSS, PSPP, jamovi e JASP), e sintaxe SPSS/PSPP para reproduzir os testes da Tabela 1.
+  (abre no SPSS, PSPP, jamovi e JASP), e sintaxe SPSS/PSPP para reproduzir os testes da tabela de comparação.
 """
 from __future__ import annotations
 
@@ -56,6 +56,7 @@ LABEL_EN = {"Sim": "Yes", "Não": "No", "Masculino": "Male", "Feminino": "Female
 TESTS = {  # nome interno → (chave, texto en, texto pt)
     "Mann–Whitney U": ("a", "Mann–Whitney U test", "teste U de Mann–Whitney"),
     "t de Student": ("b", "Student's t-test", "teste t de Student"),
+    "t de Welch": ("g", "Welch's t-test", "teste t de Welch"),
     "Qui-quadrado": ("c", "Pearson's χ² test", "teste do χ² de Pearson"),
     "Fisher exato": ("d", "Fisher's exact test", "teste exato de Fisher"),
     "Fisher (Monte Carlo)": ("e", "Fisher's exact test (Monte Carlo, 9,999 resamples)", "teste exato de Fisher (Monte Carlo, 9 999 reamostragens)"),
@@ -63,7 +64,7 @@ TESTS = {  # nome interno → (chave, texto en, texto pt)
 }
 TXT = {
     "en": {"var": "Variable", "p": "p", "smd": "SMD", "median": "median [IQR]", "n": "n (%)",
-           "title": "Table 1. Characteristics of {a} and matched {b}", "title_nm": "Table 1. Characteristics of {a} and {b}",
+           "title": "Characteristics of {a} and matched {b}", "title_nm": "Characteristics of {a} and {b}",
            "data": "Data are median [interquartile range] or n (%). p-values are two-sided.",
            "match": "Controls were matched to cases ({ratio}:1) on {crit}.",
            "relax": " Cases without a control at this stage were matched with relaxed criteria: {crit}.",
@@ -71,7 +72,7 @@ TXT = {
            "smdn": "SMD, standardised mean difference (log scale for skewed laboratory variables).",
            "miss": "Missing data (cases/controls): {lst}.", "nt": "—", "exact": "exact", "within": "±{w:g}"},
     "pt": {"var": "Variável", "p": "p", "smd": "SMD", "median": "mediana [IIQ]", "n": "n (%)",
-           "title": "Tabela 1. Características dos {a} e dos {b} emparelhados", "title_nm": "Tabela 1. Características dos {a} e dos {b}",
+           "title": "Características dos {a} e dos {b} emparelhados", "title_nm": "Características dos {a} e dos {b}",
            "data": "Dados em mediana [intervalo interquartil] ou n (%). Valores de p bilaterais.",
            "match": "Os controlos foram emparelhados aos casos ({ratio}:1) por {crit}.",
            "relax": " Os casos sem controlo nesta etapa foram emparelhados com critérios mais permissivos: {crit}.",
@@ -148,7 +149,7 @@ def build_table(R: dict, lang: str = "en", smd: bool = False) -> tuple[pd.DataFr
             xa, xb = pd.to_numeric(xa, errors="coerce"), pd.to_numeric(xb, errors="coerce")
             d = _dec(pd.concat([xa, xb]), v)
             f = lambda s: "" if s.notna().sum() == 0 else f"{_num(s.median(), d, lang)} [{_num(s.quantile(.25), d, lang)}–{_num(s.quantile(.75), d, lang)}]"
-            p, tn = comparar_continua(xa, xb) if test else (None, None)
+            p, tn = comparar_continua(xa, xb, forced=v.get("teste")) if test else (None, None)
             if v.get("log"):
                 sm = smd_cont(np.log(xa.where(xa > 0)), np.log(xb.where(xb > 0)))
             else:
@@ -165,7 +166,7 @@ def build_table(R: dict, lang: str = "en", smd: bool = False) -> tuple[pd.DataFr
             if pos is not None and len(levels) == 1 and levels[0] != pos:   # ex.: ninguém fez ECMO → mostrar "Sim: 0 (0%)"
                 levels = levels + [pos]
             tab = np.array([[int((xa_ == l).sum()) for l in levels], [int((xb_ == l).sum()) for l in levels]])
-            p, tn = comparar_categorica(tab, rng) if test and len(levels) > 1 else (None, None)
+            p, tn = comparar_categorica(tab, rng, forced=v.get("teste")) if test and len(levels) > 1 else (None, None)
             k = TESTS.get(tn, (None,))[0] if tn else None
             if k:
                 used_tests[k] = tn
@@ -177,6 +178,9 @@ def build_table(R: dict, lang: str = "en", smd: bool = False) -> tuple[pd.DataFr
             lab = lambda l: str(labs.get(l, labs.get(str(l), l)))
             if len(levels) <= 2:
                 j = len(levels) - 1
+                for jj, l in enumerate(levels):   # mostrar 'Sim'/'Feminino' quando existir (convenção habitual)
+                    if lab(l) in ("Yes", "Sim", "Female", "Feminino"):
+                        j = jj
                 lv = lab(levels[j]) if levels else ""
                 suffix = "" if lv in ("Yes", "Sim", "1", "True", "true") else f" — {lv}"
                 rows.append({"tipo": "var", "Variável": f"{name}{suffix}, {T['n']}", "casos": cell(0, j) if levels else "",
@@ -366,22 +370,26 @@ def sav_frame(R: dict, lang: str = "en"):
     c = cfg["colunas"]
     vars_ = [v for v in cfg["equilibrio"]["variaveis"] if v["col"] in R["sel_cases"].columns]
     extra = [x for x in cfg.get("saida", {}).get("colunas", []) if x in R["sel_cases"].columns and x not in {v["col"] for v in vars_}]
-    keep = [idc, c["n_amostra"], c["data_colheita"]] + [v["col"] for v in vars_] + extra
+    ns = c.get("n_amostra") if c.get("n_amostra") in R["sel_cases"].columns else None
+    dc = c.get("data_colheita") if c.get("data_colheita") in R["sel_cases"].columns else None
+    keep = list(dict.fromkeys([idc] + [x for x in (ns, dc) if x] + [v["col"] for v in vars_] + extra))
     a = R["sel_cases"][keep].copy()
-    a["grupo"], a["conjunto"] = 1, a[idc]
-    b = R["sel_ctrl"][keep + ["_caso"]].copy().rename(columns={"_caso": "conjunto"})
-    b["grupo"] = 0
+    a["__grupo"], a["__conjunto"] = 1, a[idc]
+    b = R["sel_ctrl"][keep + ["_caso"]].copy().rename(columns={"_caso": "__conjunto"})
+    b["__grupo"] = 0
     d = pd.concat([a, b], ignore_index=True)
     used, ren, vlab, vval = set(), {}, {}, {}
     an, bn = group_names(R, lang)
-    for col in ["grupo", "conjunto"] + keep:
-        ren[col] = _safe({idc: "id", c["n_amostra"]: "n_amostra", c["data_colheita"]: "data_colheita"}.get(col, col), used)
-    vlab[ren["grupo"]] = "Group" if lang == "en" else "Grupo"
-    vval[ren["grupo"]] = {1: an, 0: bn}
-    vlab[ren["conjunto"]] = "Matched set (case ID)" if lang == "en" else "Conjunto emparelhado (ID do caso)"
-    vlab[ren[idc]] = "Patient ID" if lang == "en" else "ID do doente"
-    vlab[ren[c["n_amostra"]]] = "Biobank sample number" if lang == "en" else "Nº da amostra no biobanco"
-    vlab[ren[c["data_colheita"]]] = "Sampling date" if lang == "en" else "Data da colheita"
+    for col in ["__grupo", "__conjunto"] + keep:   # nomes reservados primeiro: nunca colidem com colunas da base
+        ren[col] = _safe({idc: "id", ns: "n_amostra", dc: "data_colheita", "__grupo": "grupo", "__conjunto": "conjunto"}.get(col, col), used)
+    vlab[ren["__grupo"]] = "Group (1 = case, 0 = control)" if lang == "en" else "Grupo (1 = caso, 0 = controlo)"
+    vval[ren["__grupo"]] = {1: an, 0: bn}
+    vlab[ren["__conjunto"]] = "Matched set (case ID)" if lang == "en" else "Conjunto emparelhado (ID do caso)"
+    vlab[ren[idc]] = "Participant ID" if lang == "en" else "ID do participante"
+    if ns:
+        vlab[ren[ns]] = "Sample number" if lang == "en" else "Nº da amostra"
+    if dc:
+        vlab[ren[dc]] = "Sampling date" if lang == "en" else "Data da colheita"
     for v in vars_:
         name, _, labs = _vinfo(v, lang)
         vlab[ren[v["col"]]] = name
@@ -395,7 +403,7 @@ def sav_frame(R: dict, lang: str = "en"):
                 vval[ren[v["col"]]] = vv
     for col in extra:
         vlab[ren[col]] = DEFAULTS.get(col, (col,))[0] if lang == "en" else col
-    d = d[["grupo", "conjunto"] + keep].rename(columns=ren)
+    d = d[["__grupo", "__conjunto"] + keep].rename(columns=ren)
     for col in d.columns:
         if d[col].dtype == bool or str(d[col].dtype) == "boolean":
             d[col] = d[col].astype(float)
@@ -405,7 +413,8 @@ def sav_frame(R: dict, lang: str = "en"):
                 d[col] = num
             else:
                 d[col] = d[col].astype(str).where(d[col].notna(), "")
-    d[ren[c["data_colheita"]]] = pd.to_datetime(d[ren[c["data_colheita"]]])
+    if dc:
+        d[ren[dc]] = pd.to_datetime(d[ren[dc]])
     tests = {}
     for v in vars_:
         if not v.get("testar", True):
@@ -418,17 +427,18 @@ def write_sav(R: dict, path: str | Path, lang: str = "en"):
     import pyreadstat
     d, vlab, vval, _ = sav_frame(R, lang)
     pyreadstat.write_sav(d, str(path), column_labels=[vlab.get(c, c) for c in d.columns],
-                         variable_value_labels=vval, variable_measure={c: ("nominal" if c in vval or c == "grupo" else "scale") for c in d.columns})
+                         variable_value_labels=vval, variable_measure={c: ("nominal" if c in vval or c == "grupo" or d[c].dtype == object else "scale") for c in d.columns})
     return path
 
 
 def write_sps(R: dict, path: str | Path, sav_name: str, lang: str = "en"):
-    """Sintaxe SPSS/PSPP para reproduzir os testes da Tabela 1 (compara com as linhas 'Pearson' e com variâncias iguais)."""
+    """Sintaxe SPSS/PSPP para reproduzir os testes da tabela de comparação (compara com as linhas 'Pearson' e com variâncias iguais)."""
     d, vlab, vval, tests = sav_frame(R, lang)
     cont = [c for c, k in tests.items() if k == "continua"]
     cat = [c for c, k in tests.items() if k != "continua"]
-    L = [f"* Validação da Tabela 1 gerada pelo SelPop ({R['meta']['estudo']}).",
-         "* Comparar: contínuas → Mann-Whitney ou t (linha 'Equal variances assumed'); categóricas → 'Pearson Chi-Square'",
+    L = [f"* Validação da tabela de comparação gerada pelo SelPop ({R['meta']['estudo']}).",
+         "* Comparar: contínuas → Mann-Whitney ou t (linha 'Equal variances assumed'; t de Welch → 'Equal variances not assumed');",
+         "* categóricas → 'Pearson Chi-Square'",
          "* (sem correção de Yates) ou 'Fisher's Exact Test'. Fisher r×c: o SelPop usa Monte Carlo; pequenas diferenças são esperadas.",
          f"GET FILE='{sav_name}'.", ""]
     if cont:
@@ -442,7 +452,7 @@ def write_sps(R: dict, path: str | Path, sav_name: str, lang: str = "en"):
 
 
 def write_pub_sheet(wb, sheet_name: str, R: dict, lang: str = "en", smd: bool = True):
-    """Acrescenta a Tabela 1 de publicação a um workbook openpyxl aberto."""
+    """Acrescenta a tabela de publicação a um workbook openpyxl aberto."""
     from openpyxl.styles import Alignment, Border, Font, Side
     df, meta = build_table(R, lang, smd)
     ws = wb.create_sheet(sheet_name)

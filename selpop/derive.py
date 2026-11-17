@@ -69,99 +69,142 @@ def _kdigo_patient(t, hi, lo, dias_admissao):
     return crit, stage, adm
 
 
+def _has(df, c, *keys) -> bool:
+    """Todas as chaves estão mapeadas na configuração e existem na base."""
+    return all(c.get(k) and c.get(k) in df.columns for k in keys)
+
+
 def derive(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    c = cfg["colunas"]
-    # nomes curtos (numéricos) para colunas de laboratório com nomes longos
+    """Calcula as variáveis derivadas disponíveis com as colunas mapeadas em `colunas`.
+
+    Só `dados.id` é obrigatório. Cada bloco (amostra, idade/sexo, internamento, VMI/ECMO, SOFA, função renal
+    e LRA) só é calculado se as colunas de que precisa estiverem mapeadas; os restantes são ignorados.
+    """
+    c = dict(cfg.get("colunas") or {})
+    # uma só coluna de creatinina/ureia serve como máximo e mínimo do dia
+    for base in ("creatinina", "ureia"):
+        if c.get(base) and not c.get(f"{base}_max"):
+            c[f"{base}_max"] = c[f"{base}_min"] = c[base]
     for alias, col in (cfg.get("aliases") or {}).items():
         if col in df.columns:
             df[alias] = to_num(df[col])
-    idc, dt = cfg["dados"]["id"], c["data_colheita"]
-    df = df.sort_values([idc, dt]).reset_index(drop=True).copy()
-    for k in ("data_admissao", "vmi_inicio", "vmi_fim", "ecmo_inicio", "ecmo_fim", "data_colheita"):
-        if c.get(k) in df.columns:
+    idc = cfg["dados"]["id"]
+    dt = c.get("data_colheita") if _has(df, c, "data_colheita") else None
+    for k in ("data_admissao", "data_alta", "vmi_inicio", "vmi_fim", "ecmo_inicio", "ecmo_fim", "data_colheita"):
+        if _has(df, c, k):
             df[c[k]] = pd.to_datetime(df[c[k]], errors="coerce")
+    df["_ordem_original"] = np.arange(len(df))
+    df = df.sort_values([idc, dt, "_ordem_original"] if dt else [idc, "_ordem_original"]).reset_index(drop=True).copy()
 
-    crmax, crmin = to_num(df[c["creatinina_max"]]), to_num(df[c["creatinina_min"]])
-    urmax, urmin = to_num(df[c["ureia_max"]]), to_num(df[c["ureia_min"]])
-    fem = df[c["sexo"]] == c["sexo_feminino"]
+    # --- amostra e quantidade de dados
+    df["amostra"] = df[c["n_amostra"]].notna() if _has(df, c, "n_amostra") else True
+    g = df.groupby(idc)
+    df["dias_com_dados"] = g[idc].transform("size")
+    df["n_amostras_doente"] = g["amostra"].transform("sum")
+    fem = (df[c["sexo"]] == c.get("sexo_feminino", 1)) if _has(df, c, "sexo") else None
+    age = to_num(df[c["idade"]]) if _has(df, c, "idade") else None
 
-    # --- nível do dia
-    df["amostra"] = df[c["n_amostra"]].notna()
-    df["cr_unico"] = crmax.notna() & (crmax == crmin)
-    df["ur_unico"] = urmax.notna() & (urmax == urmin)
-    df["cr_dia"] = crmax.where(df.cr_unico)
-    df["ur_dia"] = urmax.where(df.ur_unico)
-    df["cr_max_dia"], df["cr_min_dia"] = crmax, crmin
-    df["dias_desde_admissao"] = (df[dt] - df[c["data_admissao"]]).dt.days
-    df["em_vmi_dia"] = in_period(df[dt], df[c["vmi_inicio"]], df[c["vmi_fim"]], df[c["vmi"]])
-    df["em_ecmo_dia"] = in_period(df[dt], df[c["ecmo_inicio"]], df[c["ecmo_fim"]], df[c["ecmo"]])
-    df["dias_vmi_ate_amostra"] = np.where(df.em_vmi_dia, (df[dt] - df[c["vmi_inicio"]]).dt.days, 0)
-    sofa_t, sofa_r = to_num(df[c["sofa_total"]]), to_num(df[c["sofa_renal"]])
-    df["sofa_total_dia"] = sofa_t
-    df["sofa_nao_renal_dia"] = sofa_t - sofa_r
-    if c.get("sofa_cardiovascular") in df.columns:
-        sofa_cv = to_num(df[c["sofa_cardiovascular"]])
-        df["sofa_cv_dia"] = sofa_cv
-        df["sofa_nao_renal_nao_cv_dia"] = sofa_t - sofa_r - sofa_cv
-    df["tfge_dia"] = ckdepi2021(crmin, df[c["idade"]], fem)
+    # --- internamento
+    if dt and _has(df, c, "data_admissao"):
+        df["dias_desde_admissao"] = (df[dt] - df[c["data_admissao"]]).dt.days
+    if _has(df, c, "data_alta", "data_admissao"):
+        df["duracao_uci_dias"] = (df[c["data_alta"]] - df[c["data_admissao"]]).dt.days
+    if dt and _has(df, c, "vmi_inicio", "vmi_fim"):
+        df["em_vmi_dia"] = in_period(df[dt], df[c["vmi_inicio"]], df[c["vmi_fim"]], df[c["vmi"]] if _has(df, c, "vmi") else None)
+        df["dias_vmi_ate_amostra"] = np.where(df.em_vmi_dia, (df[dt] - df[c["vmi_inicio"]]).dt.days, 0)
+    if dt and _has(df, c, "ecmo_inicio", "ecmo_fim"):
+        df["em_ecmo_dia"] = in_period(df[dt], df[c["ecmo_inicio"]], df[c["ecmo_fim"]], df[c["ecmo"]] if _has(df, c, "ecmo") else None)
 
-    # --- LRA (KDIGO, critério de creatinina) e janelas temporais
+    # --- SOFA
+    if _has(df, c, "sofa_total"):
+        sofa_t = to_num(df[c["sofa_total"]])
+        df["sofa_total_dia"] = sofa_t
+        if _has(df, c, "sofa_renal"):
+            sofa_r = to_num(df[c["sofa_renal"]])
+            df["sofa_nao_renal_dia"] = sofa_t - sofa_r
+            if _has(df, c, "sofa_cardiovascular"):
+                sofa_cv = to_num(df[c["sofa_cardiovascular"]])
+                df["sofa_cv_dia"] = sofa_cv
+                df["sofa_nao_renal_nao_cv_dia"] = sofa_t - sofa_r - sofa_cv
+
+    # --- função renal
+    if _has(df, c, "creatinina_max", "creatinina_min"):
+        crmax, crmin = to_num(df[c["creatinina_max"]]), to_num(df[c["creatinina_min"]])
+        df["cr_unico"] = crmax.notna() & (crmax == crmin)
+        df["cr_dia"] = crmax.where(df.cr_unico)
+        df["cr_max_dia"], df["cr_min_dia"] = crmax, crmin
+        df["cr_min_internamento"] = df.groupby(idc)["cr_min_dia"].transform("min")
+        if age is not None and fem is not None:
+            df["tfge_dia"] = ckdepi2021(crmin, age, fem)
+            df["tfge_basal_proxy"] = ckdepi2021(df.cr_min_internamento, age, fem)
+        if dt and (cfg.get("lra") or {}).get("calcular", True):
+            df = _lra_block(df, cfg, idc, dt, crmax, crmin)
+    if _has(df, c, "ureia_max", "ureia_min"):
+        urmax, urmin = to_num(df[c["ureia_max"]]), to_num(df[c["ureia_min"]])
+        df["ur_unico"] = urmax.notna() & (urmax == urmin)
+        df["ur_dia"] = urmax.where(df.ur_unico)
+    return df.drop(columns="_ordem_original")
+
+
+def _lra_block(df, cfg, idc, dt, crmax, crmin):
+    """LRA (critério de creatinina KDIGO) e janelas temporais — requer datas e creatinina diária."""
+    crmax, crmin = crmax.values, crmin.values
     df["lra_dia"] = False
     df["lra_estadio_dia"] = 0
+    lra_cfg = cfg.get("lra", {}) or {}
+    k = lra_cfg.get("janela_estavel_dias", 2)
     pat = {}
     for pid, idx in df.groupby(idc).indices.items():
         g = df.iloc[idx]
         t = g[dt].values
-        crit, stage, adm = _kdigo_patient(t, crmax.values[idx], crmin.values[idx], cfg.get("lra", {}).get("dias_admissao", 2))
+        crit, stage, adm = _kdigo_patient(t, crmax[idx], crmin[idx], lra_cfg.get("dias_admissao", 2))
         df.loc[g.index, "lra_dia"] = crit
         df.loc[g.index, "lra_estadio_dia"] = stage
         onset = t[crit.argmax()] if crit.any() else np.datetime64("NaT")
-        has_cr = np.isfinite(crmax.values[idx])
+        has_cr = np.isfinite(crmax[idx])
         last_cr = t[has_cr][-1] if has_cr.any() else np.datetime64("NaT")
-        # janela ±k dias sem critério de LRA
-        k = cfg.get("lra", {}).get("janela_estavel_dias", 2)
         quiet = np.array([not crit[(t >= t[i] - D(k)) & (t <= t[i] + D(k))].any() for i in range(len(t))])
         df.loc[g.index, "sem_lra_janela"] = quiet
         df.loc[g.index, "dias_obs_apos"] = (last_cr - t) / D(1) if not pd.isna(last_cr) else np.nan
         df.loc[g.index, "dias_ate_lra"] = (onset - t) / D(1) if not pd.isna(onset) else np.nan
+        first = g.index[crit.argmax()] if crit.any() else None
         pat[pid] = {"lra_subida": bool(crit.any()), "lra_admissao": bool(adm), "lra_inicio": onset,
                     "lra_estadio_max": int(stage.max()) if len(stage) else 0,
-                    "lra_inicio_dias_admissao": float(df.loc[g.index[crit.argmax()], "dias_desde_admissao"]) if crit.any() else np.nan}
+                    "lra_inicio_dias_admissao": float(df.loc[first, "dias_desde_admissao"]) if first is not None and "dias_desde_admissao" in df else np.nan}
     df["sem_lra_janela"] = df["sem_lra_janela"].astype(bool)
     P = pd.DataFrame.from_dict(pat, orient="index")
     P["lra_qualquer"] = P.lra_subida | P.lra_admissao
-    df = df.join(P, on=idc).copy()
-
-    # --- nível do doente
-    g = df.groupby(idc)
-    df["cr_min_internamento"] = g["cr_min_dia"].transform("min")
-    df["tfge_basal_proxy"] = ckdepi2021(df.cr_min_internamento, df[c["idade"]], fem)
-    df["dias_com_dados"] = g[dt].transform("count")
-    df["n_amostras_doente"] = g["amostra"].transform("sum")
-    if c.get("data_alta") in df.columns:
-        df["duracao_uci_dias"] = (pd.to_datetime(df[c["data_alta"]], errors="coerce") - df[c["data_admissao"]]).dt.days
-    return df
+    return df.join(P, on=idc).copy()
 
 
 def quality_checks(df: pd.DataFrame, cfg: dict) -> pd.DataFrame:
-    """Verificações de coerência das datas e valores, ao nível do doente. Não altera os dados: só reporta."""
-    c, idc = cfg["colunas"], cfg["dados"]["id"]
-    p = df.groupby(idc).agg(primeira=(c["data_colheita"], "min"), adm=(c["data_admissao"], "first"),
-                            vi=(c["vmi_inicio"], "first"), vf=(c["vmi_fim"], "first"),
-                            ei=(c["ecmo_inicio"], "first"), ef=(c["ecmo_fim"], "first"),
-                            idade=(c["idade"], "first"), crmax=("cr_max_dia", "max"), crmin=("cr_min_dia", "min"))
-    checks = [
-        ("Amostra/registo com data anterior à admissão", (p.primeira - p.adm).dt.days < 0),
-        ("Início de VMI >1 dia antes da admissão na UCI", (p.vi - p.adm).dt.days < -1),
-        ("Início de VMI >60 dias após a admissão", (p.vi - p.adm).dt.days > 60),
-        ("Fim de VMI anterior ao início", (p.vf - p.vi).dt.days < 0),
-        ("Fim de ECMO anterior ao início", (p.ef - p.ei).dt.days < 0),
-        ("Idade fora de 18–105", (p.idade < 18) | (p.idade > 105)),
-        ("Creatinina fora de 0,1–20 mg/dL", (p.crmin < 0.1) | (p.crmax > 20)),
-    ]
+    """Verificações de coerência, ao nível do indivíduo, com as colunas disponíveis. Não altera os dados: só reporta."""
+    c, idc = dict(cfg.get("colunas") or {}), cfg["dados"]["id"]
+    g = df.groupby(idc)
+    checks = []
+    first = lambda k: g[c[k]].first()
+    if _has(df, c, "data_colheita", "data_admissao"):
+        checks.append(("Amostra/registo com data anterior à admissão", (g[c["data_colheita"]].min() - first("data_admissao")).dt.days < 0))
+    if _has(df, c, "vmi_inicio", "data_admissao"):
+        d = (first("vmi_inicio") - first("data_admissao")).dt.days
+        checks += [("Início de VMI >1 dia antes da admissão", d < -1), ("Início de VMI >60 dias após a admissão", d > 60)]
+    if _has(df, c, "vmi_inicio", "vmi_fim"):
+        checks.append(("Fim de VMI anterior ao início", (first("vmi_fim") - first("vmi_inicio")).dt.days < 0))
+    if _has(df, c, "ecmo_inicio", "ecmo_fim"):
+        checks.append(("Fim de ECMO anterior ao início", (first("ecmo_fim") - first("ecmo_inicio")).dt.days < 0))
+    if _has(df, c, "idade"):
+        a = to_num(first("idade"))
+        checks.append(("Idade fora de 18–105", (a < 18) | (a > 105)))
+    if "cr_max_dia" in df:
+        checks.append(("Creatinina fora de 0,1–20 mg/dL", (g["cr_min_dia"].min() < 0.1) | (g["cr_max_dia"].max() > 20)))
+    if _has(df, c, "data_colheita") and _has(df, c, "n_amostra"):
+        dup = df[df[c["n_amostra"]].notna()].duplicated(c["n_amostra"], keep=False)
+        ids = df[df[c["n_amostra"]].notna()][dup][idc].unique()
+        checks.append(("Nº de amostra repetido", pd.Series(True, index=ids) if len(ids) else pd.Series(dtype=bool)))
+    checks.append(("Linhas sem ID", pd.Series(True, index=["(linhas)"]) if df[idc].isna().any() else pd.Series(dtype=bool)))
     rows = []
     for name, m in checks:
-        m = m.fillna(False)
-        ids = p.index[m].tolist()
+        m = m.fillna(False).astype(bool)
+        ids = m.index[m].tolist()
         rows.append({"Verificação": name, "N.º doentes": len(ids), "IDs (até 40)": ", ".join(map(str, ids[:40]))})
     return pd.DataFrame(rows)

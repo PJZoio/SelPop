@@ -14,3 +14,7 @@ venv/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Exceção: base de exemplo com dados FICTÍCIOS (pode ir para o repositório)
+!exemplos/
+!exemplos/*.csv

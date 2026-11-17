@@ -1,4 +1,4 @@
-"""Exportação para Excel: seleção, Tabela 1, equilíbrio antes/depois, funil, iterações e configuração."""
+"""Exportação para Excel: seleção, tabela de comparação, equilíbrio antes/depois, funil, iterações e configuração."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -18,9 +18,9 @@ FILL_IN = PatternFill("solid", fgColor="FFF2CC")
 
 METODOS = [
     ("Objetivo", "Selecionar, de forma reprodutível, a população-alvo (casos) e os controlos a partir da base, com o dia/amostra-índice de cada doente, e documentar o equilíbrio entre grupos."),
-    ("Pipeline", "1) carregar base e ficheiros auxiliares; 2) derivar variáveis por dia e por doente; 3) aplicar critérios de doente e de dia a cada grupo; 4) escolher o dia-índice dos casos; 5) emparelhar controlos por etapas; 6) Tabela 1 com testes e SMD; 7) opcionalmente reequilibrar acrescentando ao emparelhamento a variável com menor p; 8) exportar."),
+    ("Pipeline", "1) carregar base e ficheiros auxiliares; 2) derivar variáveis por dia e por doente; 3) aplicar critérios de doente e de dia a cada grupo; 4) escolher o dia-índice dos casos; 5) emparelhar controlos por etapas; 6) tabela de comparação com testes e SMD; 7) opcionalmente reequilibrar acrescentando ao emparelhamento a variável com menor p; 8) exportar."),
     ("Emparelhamento", "Guloso global sem reposição: todos os pares caso–(doente-dia controlo) admissíveis (igualdade nas variáveis 'exato', diferença ≤ calibre nas restantes) ordenados por custo = Σ|diferença|/calibre, com desempate aleatório reprodutível (semente). Cada doente-controlo é usado uma vez. Casos que não completam a razão passam à etapa seguinte, mais permissiva. Os primeiros controlos de cada caso (até à razão) são 'principais'; os seguintes são 'suplentes'."),
-    ("Testes (como nos artigos do grupo)", "Contínuas: mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student (variâncias iguais) se ambos normais, senão Mann–Whitney U (aproximação normal com correção de empates, sem correção de continuidade, como no SPSS/PSPP). Categóricas: n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Bilateral; α definido na configuração. Sem correção para comparações múltiplas (Tabela 1 descritiva)."),
+    ("Testes (como nos artigos do grupo)", "Contínuas: mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student (variâncias iguais) se ambos normais, senão Mann–Whitney U (aproximação normal com correção de empates, sem correção de continuidade, como no SPSS/PSPP). Categóricas: n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Bilateral; α definido na configuração. Sem correção para comparações múltiplas (tabela descritiva)."),
     ("SMD", "Diferença média padronizada (para categóricas com >2 níveis, o maior |SMD| entre níveis). Não depende de n: com grupos pequenos, 'p ≥ α' não demonstra equilíbrio, e o SMD ajuda a ver diferenças relevantes que o teste não deteta. Referência habitual: |SMD| < 0,1."),
     ("TFGe", "CKD-EPI 2021 sem coeficiente de raça. Em UCI a creatinina não está em estado estacionário e a perda muscular sobrestima a TFGe: usar como descritiva. 'tfge_basal_proxy' usa a creatinina mínima do internamento."),
     ("LRA (KDIGO, critério de creatinina)", "Subida: creatinina máx. do dia ≥1,5× o mínimo dos 7 dias anteriores (incl. o dia) ou ≥0,3 mg/dL acima do mínimo das 48 h anteriores. Presente na admissão: nos primeiros dias, creatinina ≥1,5× o nadir dos 7 dias seguintes. Estádio 1/2/3 pelo rácio face ao basal (1,5–1,9 / 2,0–2,9 / ≥3,0 ou ≥4,0 mg/dL). Aproximação: não há débito urinário nem creatinina pré-admissão; comparações entre valores diários."),
@@ -75,7 +75,11 @@ def _sel_rows(R, papel_filter):
 
 
 def _base(r, idc, c, cols):
-    d = {"ID": r[idc], "Nº amostra": r[c["n_amostra"]], "Data colheita": pd.to_datetime(r[c["data_colheita"]]).date()}
+    """Identificação da linha. Sem coluna de nº de amostra, usa o ID; sem data, deixa vazio."""
+    ns, dc = c.get("n_amostra"), c.get("data_colheita")
+    dv = pd.to_datetime(r[dc], errors="coerce") if dc and dc in r.index else pd.NaT
+    d = {"ID": r[idc], "Nº amostra": r[ns] if ns and ns in r.index else r[idc],
+         "Data colheita": None if pd.isna(dv) else dv.date()}
     for k in cols:
         v = r[k]
         d[k] = (v.item() if hasattr(v, "item") else v)
@@ -110,13 +114,14 @@ def write(R: dict, out_path: str | Path, pub_lang: str = "en"):
         pd.DataFrame(leia, columns=["Item", "Descrição"]).to_excel(xw, sheet_name="LEIA-ME", index=False)
         R["funil"].to_excel(xw, sheet_name="Funil", index=False)
         R["qc"].to_excel(xw, sheet_name="Qualidade_dados", index=False)
-        ta.drop(columns="_k").to_excel(xw, sheet_name="Tabela1", index=False, startrow=2)
+        ta.drop(columns="_k").to_excel(xw, sheet_name="Comparacao_grupos", index=False, startrow=2)
         eq.to_excel(xw, sheet_name="Equilibrio_antes_depois", index=False)
         sel.to_excel(xw, sheet_name="Selecao", index=False)
         (sup if len(sup) else pd.DataFrame({"Nota": ["Sem suplentes"]})).to_excel(xw, sheet_name="Suplentes", index=False)
         if len(unmatched):
-            u = unmatched[[idc, cfg["colunas"]["n_amostra"], cfg["colunas"]["data_colheita"]] +
-                          [v["col"] for v in cfg["equilibrio"]["variaveis"] if v["col"] in unmatched.columns][:8]]
+            idcols = [idc] + [cfg["colunas"][k] for k in ("n_amostra", "data_colheita")
+                              if cfg["colunas"].get(k) in unmatched.columns]
+            u = unmatched[idcols + [v["col"] for v in cfg["equilibrio"]["variaveis"] if v["col"] in unmatched.columns][:8]]
             u.to_excel(xw, sheet_name="Casos_sem_controlo", index=False)
         if len(R["iters"]):
             R["iters"].to_excel(xw, sheet_name="Iteracoes", index=False)
@@ -126,8 +131,8 @@ def write(R: dict, out_path: str | Path, pub_lang: str = "en"):
     _style(wb["LEIA-ME"], widths={"A": 30, "B": 120}, wrap=("A", "B"))
     _style(wb["Qualidade_dados"], widths={"A": 48, "B": 12, "C": 100}, wrap=("C",))
     _style(wb["Funil"], widths={"A": 26, "B": 90, "C": 10, "D": 14}, wrap=("B",))
-    ws = wb["Tabela1"]
-    ws["A1"] = f"Tabela 1 — {names[0]} vs {names[1]} (após emparelhamento). α = {meta['alfa']}"
+    ws = wb["Comparacao_grupos"]
+    ws["A1"] = f"Comparação entre grupos — {names[0]} vs {names[1]} (após emparelhamento). α = {meta['alfa']}"
     ws["A1"].font = Font(name=F, bold=True, size=12, color="1F3864")
     _style(ws, header_row=3, widths={"A": 34, "B": 20, "C": 18, "D": 18, "E": 16, "F": 9, "G": 8, "H": 12, "I": 12, "J": 12})
     ws.freeze_panes = "A4"
@@ -167,7 +172,7 @@ def write(R: dict, out_path: str | Path, pub_lang: str = "en"):
             _style(wb[name], widths={"A": 12, "B": 14, "C": 16, "D": 40, "E": 12, "F": 70, "G": 10}, wrap=("D", "F"))
     _style(wb["Config"], widths={"A": 120})
     from .publish import write_pub_sheet
-    ws = write_pub_sheet(wb, "Table1_publication", R, lang=pub_lang, smd=True)
-    wb.move_sheet(ws, offset=-(len(wb.sheetnames) - 1 - wb.sheetnames.index("Tabela1") - 1))
+    ws = write_pub_sheet(wb, "Tabela_publicacao", R, lang=pub_lang, smd=True)
+    wb.move_sheet(ws, offset=-(len(wb.sheetnames) - 1 - wb.sheetnames.index("Comparacao_grupos") - 1))
     wb.save(out_path)
     return {"selecao": len(sel), "suplentes": len(sup), "casos_sem_controlo": len(unmatched)}

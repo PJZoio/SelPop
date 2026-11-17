@@ -17,13 +17,20 @@ def sha256(path: str | Path) -> str:
     return h.hexdigest()
 
 
+def _read_table(buf, name: str, sheet):
+    """Excel (.xlsx/.xls) ou texto delimitado (.csv/.tsv/.txt; separador detetado automaticamente)."""
+    if str(name).lower().endswith((".csv", ".tsv", ".txt")):
+        return pd.read_csv(buf, sep=None, engine="python")
+    return pd.read_excel(buf, sheet_name=sheet)
+
+
 def _read(src, sheet):
     """`src` é um caminho ou um par (nome, bytes) — este último para ficheiros carregados na interface."""
     if isinstance(src, (str, Path)):
         p = Path(src).resolve()
-        return pd.read_excel(p, sheet_name=sheet), p.name, sha256(p)
+        return _read_table(p, p.name, sheet), p.name, sha256(p)
     name, data = src
-    return pd.read_excel(io.BytesIO(data), sheet_name=sheet), name, hashlib.sha256(data).hexdigest()
+    return _read_table(io.BytesIO(data), name, sheet), name, hashlib.sha256(data).hexdigest()
 
 
 def load_sources(cfg: dict, main_src, aux_srcs: list | None = None) -> tuple[pd.DataFrame, list[dict]]:

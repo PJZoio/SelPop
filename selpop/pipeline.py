@@ -1,4 +1,4 @@
-"""Orquestração: carregar → derivar → grupos → emparelhar → Tabela 1 → reequilibrar → resultado."""
+"""Orquestração: carregar → derivar → grupos → emparelhar → tabela de comparação → reequilibrar → resultado."""
 from __future__ import annotations
 
 import copy
@@ -59,7 +59,7 @@ def prepare(cfg: dict, raw: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame]:
 
 
 def select(cfg: dict, df: pd.DataFrame, qc: pd.DataFrame, prov: list[dict], log=print) -> dict:
-    """Grupos → emparelhamento → Tabela 1 → reequilíbrio, sobre dados já preparados."""
+    """Grupos → emparelhamento → tabela de comparação → reequilíbrio, sobre dados já preparados."""
     seed = int(cfg["estudo"].get("semente", 12345))
     rng = np.random.default_rng(seed)
     idc = cfg["dados"]["id"]
