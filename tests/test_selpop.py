@@ -255,3 +255,52 @@ def test_example_study_end_to_end(tmp_path):
     assert not ((t["Diferença significativa"] == "Sim") & conf).any()
     write(R, tmp_path / "s.xlsx"); write_docx(R, tmp_path / "t.docx"); write_sav(R, tmp_path / "d.sav")
     assert "Tabela_publicacao" in pd.ExcelFile(tmp_path / "s.xlsx").sheet_names
+
+
+def test_strata_expand_config():
+    from selpop.estratos import expand, strata
+    cfg = {"estudo": {"nome": "E"}, "estratificar": "diabetes",
+           "grupos": {"casos": {"doente": "grupo == 'Caso'"}, "controlos": {}},
+           "emparelhamento": {"etapas": [{"exato": ["sexo"]}], "reequilibrar": {"ativo": True, "candidatas": ["diabetes", "hta"]}},
+           "equilibrio": {"variaveis": [{"col": "diabetes", "nome": "Diabetes", "tipo": "categorica", "rotulos": {0: "Não", 1: "Sim"}},
+                                        {"col": "hta", "tipo": "categorica"}]}}
+    S = strata(cfg)
+    assert [e["valor"] for e in S] == [0, 1] and S[1]["rotulo_en"] == "Diabetes: Yes"
+    out = expand(cfg)
+    assert [s for s, _ in out] == ["diabetes0", "diabetes1"]
+    c = out[1][1]
+    assert "estratificar" not in c and "estratificar" in cfg            # original intacto
+    assert c["grupos"]["casos"]["doente"][0]["expr"] == "diabetes == 1"
+    assert c["grupos"]["controlos"]["doente"][0]["expr"] == "diabetes == 1"
+    assert c["grupos"]["casos"]["doente"][1] == "grupo == 'Caso'"
+    assert [v["col"] for v in c["equilibrio"]["variaveis"]] == ["hta"]   # constante no estrato → sai da tabela
+    assert c["emparelhamento"]["reequilibrar"]["candidatas"] == ["hta"]
+    assert expand({"estudo": {}})[0][0] is None                          # sem estratificação: igual
+
+
+def test_config_inheritance(tmp_path):
+    from selpop.pipeline import load_config
+    (tmp_path / "a.yaml").write_text("estudo: {nome: A, semente: 1}\nequilibrio: {alfa: 0.05}\n", encoding="utf-8")
+    (tmp_path / "b.yaml").write_text("base: a.yaml\nestudo: {nome: B}\nestratificar: x\n", encoding="utf-8")
+    c = load_config(tmp_path / "b.yaml")
+    assert c["estudo"] == {"nome": "B", "semente": 1} and c["estratificar"] == "x" and c["equilibrio"]["alfa"] == 0.05
+
+
+def test_stratified_example_end_to_end(tmp_path):
+    from pathlib import Path
+    from selpop.consolidar import labels_for, run_many, write_many
+    from selpop.publish import build_table
+    p = Path(__file__).resolve().parents[1] / "estudos" / "exemplo_generico.yaml"
+    Rs = run_many([p], log=lambda *a: None, estratificar="hta")
+    labs = labels_for(Rs, ["EX"])
+    assert labs == ["EX-hta0", "EX-hta1"]
+    for R in Rs:
+        v = R["estrato"]["valor"]
+        assert (R["sel_cases"].hta == v).all() and (R["sel_ctrl"].hta == v).all()
+        assert "Hipertensão arterial" not in set(R["t_after"]["Variável"])
+    full = run_many([p], log=lambda *a: None)[0]
+    assert sum(len(R["cases"]) for R in Rs) == len(full["cases"])        # estratos cobrem todos os casos elegíveis
+    assert "Hypertension: Yes" in build_table(Rs[1], "en")[1]["title"]
+    write_many(Rs, labs, tmp_path / "x.xlsx")
+    from openpyxl import load_workbook
+    assert "EX-hta1_Publicacao" in load_workbook(tmp_path / "x.xlsx").sheetnames

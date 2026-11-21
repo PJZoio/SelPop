@@ -40,7 +40,9 @@ selpop._src_hash = _SRC_HASH
 from selpop import __version__  # noqa: E402
 from selpop.cohort import q  # noqa: E402
 from selpop.io import load_sources  # noqa: E402
-from selpop.pipeline import prep_key_of, prepare, select  # noqa: E402
+from selpop.consolidar import write_many  # noqa: E402
+from selpop.estratos import expand, strata  # noqa: E402
+from selpop.pipeline import load_config, prep_key_of, prepare, select  # noqa: E402
 from selpop.publish import TXT as TXT_PUB, build_table, write_docx, write_sav, write_sps  # noqa: E402
 from selpop.report import write  # noqa: E402
 from selpop.stats import TESTES_CATEGORICA, TESTES_CONTINUA, explorar, inferir_tipo  # noqa: E402
@@ -210,7 +212,7 @@ def load_template(cfg: dict):
     ss.init_stages = stages_to_df((cfg.get("emparelhamento") or {}).get("etapas"))
     ss.init_vars = vars_to_df(cfg["equilibrio"]["variaveis"])
     ss.test_choice = {v["col"]: v.get("teste", "auto") for v in cfg["equilibrio"]["variaveis"]}
-    for k in ("R", "R_cfg_yaml"):
+    for k in ("R", "RS", "R_cfg_yaml"):
         ss.pop(k, None)
 
 
@@ -335,7 +337,7 @@ if ss.get("cfg_src") != src_id:
     elif tname == BLANK:
         cfg0 = blank_cfg(raw, main_name)
     else:
-        cfg0 = yaml.safe_load(TEMPLATES[tname].read_text(encoding="utf-8"))
+        cfg0 = load_config(TEMPLATES[tname])   # resolve `base:` (variantes que herdam de outro estudo)
     cfg0.setdefault("dados", {})["folha"] = sheet
     load_template(cfg0)
     ss.cfg_src = src_id
@@ -514,6 +516,16 @@ with tabs[2]:
                            default=[c for c in reeq0.get("candidatas", []) if c in cols_all], key=f"cands_{V}")
     st.caption("Se algum confundidor destas variáveis tiver p < α, é acrescentado ao emparelhamento e a seleção repete-se; fica a iteração "
                "com menos diferenças. É uma ajuda prática — a escolha das variáveis de emparelhamento deve ser científica.")
+    st.markdown("**Estratificação (opcional)**")
+    st.caption("Repete a seleção completa — critérios, emparelhamento, reequilíbrio e testes — separadamente dentro de cada valor de uma "
+               "variável categórica (ex.: COVID-19 sim/não). Cada estrato tem a sua tabela de características. Útil quando se espera que a "
+               "variável mude muito o perfil dos doentes; o preço são grupos mais pequenos em cada estrato.")
+    strat0 = base_cfg.get("estratificar")
+    strat0_col = strat0.get("col") if isinstance(strat0, dict) else strat0
+    strat_opts = [""] + [c for c in cols_all if c != idc and 1 < df[c].nunique(dropna=True) <= 10]
+    strat_col = st.selectbox("Estratificar por", strat_opts, index=strat_opts.index(strat0_col) if strat0_col in strat_opts else 0,
+                             format_func=lambda c: c or "— sem estratificação —", key=f"strat_{V}",
+                             help="Só colunas com 2 a 10 valores diferentes. Os rótulos dos estratos vêm da variável no passo 4, se lá estiver.")
 
 # ================================================================ 4. VARIÁVEIS
 with tabs[3]:
@@ -574,6 +586,10 @@ def current_cfg() -> dict:
         else:
             v.pop("teste", None)
     cfg["equilibrio"] = {"alfa": float(alpha), "variaveis": vs}
+    if strat_col:
+        cfg["estratificar"] = copy.deepcopy(strat0) if strat0_col == strat_col and isinstance(strat0, dict) else {"col": strat_col}
+    else:
+        cfg.pop("estratificar", None)
     return cfg
 
 
@@ -610,8 +626,29 @@ except ValueError as e:
 
 def run_selection(cfg):
     with st.spinner("A selecionar, emparelhar e testar…"):
-        ss.R = select(cfg, df, qc, prov, log=lambda *_: None)
+        ss.RS = [(c["estudo"].get("estrato"), select(c, df, qc, prov, log=lambda *_: None)) for _, c in expand(cfg, df)]
+        for e, r in ss.RS:
+            r["estrato"] = e
+        ss.R = ss.RS[0][1]
         ss.R_cfg_yaml = yaml.safe_dump(cfg, allow_unicode=True, sort_keys=False)
+
+
+def current_R():
+    """Resultado a mostrar: com estratificação, o estrato escolhido no passo 6 (widget único `estrato_sel`)."""
+    RS = ss.get("RS") or []
+    if len(RS) > 1:
+        i = ss.get("estrato_sel", 0)
+        return RS[i if isinstance(i, int) and i < len(RS) else 0][1]
+    return ss.get("R")
+
+
+def stratum_selector():
+    RS = ss.get("RS") or []
+    if len(RS) > 1:
+        labs = [f"{e['rotulo']} — {r['sel_cases'].shape[0]} casos / {r['sel_ctrl'].shape[0]} controlos" for e, r in RS]
+        if ss.get("estrato_sel", 0) >= len(RS):
+            ss.estrato_sel = 0
+        st.radio("Estrato a mostrar (também no passo 5)", list(range(len(RS))), format_func=lambda k: labs[k], horizontal=True, key="estrato_sel")
 
 
 # ================================================================ 5. ESCOLHA DOS TESTES (pedagógico)
@@ -640,10 +677,12 @@ with tabs[4]:
         st.warning(w)
     if st.button("Correr a seleção", type="primary", disabled=bool(errs), key="run5"):
         run_selection(cfg_now)
-    R = ss.get("R")
+    R = current_R()
     if R is None:
         st.info("Carregue em **Correr a seleção** para ver o diagnóstico de cada variável nos grupos selecionados.")
     else:
+        if R.get("estrato"):
+            st.info(f"Seleção estratificada — a mostrar o estrato **{R['estrato']['rotulo']}** (mude no passo 6).")
         names = R["names"]
         rows = []
         for v in R["cfg"]["equilibrio"]["variaveis"]:
@@ -726,12 +765,34 @@ with tabs[5]:
     errs, _ = validate(cfg_now)
     if st.button("Correr a seleção", type="primary", disabled=bool(errs), key="run6"):
         run_selection(cfg_now)
-    R = ss.get("R")
+    R = current_R()
     if R is None:
         st.info("Reveja os passos 1–4 e carregue em **Correr a seleção** (aqui ou no passo 5).")
     else:
         if yaml.safe_dump(cfg_now, allow_unicode=True, sort_keys=False) != ss.R_cfg_yaml:
             st.warning("A configuração mudou desde a última execução. Os resultados abaixo são da execução anterior.")
+        RS = ss.get("RS") or []
+        if len(RS) > 1:
+            st.markdown("#### Estratos")
+            ov = []
+            for e, r in RS:
+                tt = r["t_after"]
+                cs = (tt["Diferença significativa"] == "Sim") & tt["Papel"].astype(str).str.startswith("Confundidor")
+                ov.append({"Estrato": e["rotulo"], "Casos elegíveis": len(r["cases"]), "Casos": len(r["sel_cases"]),
+                           "Controlos": len(r["sel_ctrl"]), "Suplentes": int((r["match"].papel == "suplente").sum()) if len(r["match"]) else 0,
+                           "Confundidores com p < α": ", ".join(tt.loc[cs, "Variável"]) or "nenhum"})
+            st.dataframe(pd.DataFrame(ov), hide_index=True, width="stretch")
+            small = [o["Estrato"] for o in ov if o["Casos"] < 10]
+            if small:
+                st.warning(f"Estratos com menos de 10 casos ({', '.join(small)}): os testes têm pouca potência e um modelo "
+                           "próprio não é viável — use-os como descrição ou numa análise conjunta ajustada.")
+            st.download_button("Excel com todos os estratos", _tmp_bytes(lambda p: write_many([r for _, r in RS], [e["sufixo"] for e, _ in RS], p,
+                                                                                                pub_lang=ss.get("pub_lang", "en")), ".xlsx"),
+                               file_name="selecao_estratificada.xlsx", mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                               help="Um conjunto de folhas por estrato + lista única de amostras a pedir.")
+            stratum_selector()
+            R = current_R()
+        suf = f"_{R['estrato']['sufixo']}" if R.get("estrato") else ""
         names = R["names"]
         t = R["t_after"]
         nsig = int(((t["Diferença significativa"] == "Sim") & t["Papel"].astype(str).str.startswith("Confundidor")).sum())
@@ -745,7 +806,7 @@ with tabs[5]:
 
         st.markdown("#### Descarregar")
         d1, d2, d3 = st.columns(3)
-        d1.download_button("Excel completo", _tmp_bytes(lambda p: write(R, p), ".xlsx"), file_name="selecao.xlsx", type="primary",
+        d1.download_button("Excel completo", _tmp_bytes(lambda p: write(R, p), ".xlsx"), file_name=f"selecao{suf}.xlsx", type="primary",
                            mime="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
                            help="Seleção, comparação entre grupos, funil, suplentes, controlo de qualidade e configuração.")
         d2.download_button("Configuração (YAML)", ss.R_cfg_yaml.encode("utf-8"), file_name="configuracao_selpop.yaml",
@@ -755,12 +816,12 @@ with tabs[5]:
         with_smd = d3.checkbox("Incluir coluna SMD", value=False, key="pub_smd")
         b1, b2, b3 = st.columns(3)
         b1.download_button("Tabela de características (Word)", _tmp_bytes(lambda p: write_docx(R, p, lang=lang, smd=with_smd), ".docx"),
-                           file_name=f"tabela_caracteristicas_{lang}.docx",
+                           file_name=f"tabela_caracteristicas{suf}_{lang}.docx",
                            mime="application/vnd.openxmlformats-officedocument.wordprocessingml.document")
         b2.download_button("Dados para SPSS/PSPP/jamovi (.sav)", _tmp_bytes(lambda p: write_sav(R, p, lang=lang), ".sav"),
-                           file_name="dados_selecao.sav", mime="application/octet-stream")
-        b3.download_button("Sintaxe de validação (.sps)", _tmp_bytes(lambda p: write_sps(R, p, "dados_selecao.sav", lang=lang), ".sps"),
-                           file_name="validacao.sps", mime="text/plain",
+                           file_name=f"dados_selecao{suf}.sav", mime="application/octet-stream")
+        b3.download_button("Sintaxe de validação (.sps)", _tmp_bytes(lambda p: write_sps(R, p, f"dados_selecao{suf}.sav", lang=lang), ".sps"),
+                           file_name=f"validacao{suf}.sps", mime="text/plain",
                            help="Reproduz os testes no SPSS/PSPP. Comparar com 'Pearson Chi-Square' e 'Equal variances assumed'.")
 
         st.markdown("#### Tabela para o artigo (pré-visualização)")

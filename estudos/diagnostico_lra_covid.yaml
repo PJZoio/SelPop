@@ -1,0 +1,17 @@
+# =====================================================================
+# Variante ESTRATIFICADA POR COVID-19 de diagnostico_lra.yaml
+# Repete a seleção completa (critérios, emparelhamento, reequilíbrio e testes) dentro de cada estrato:
+# doentes COVID-19 e doentes sem COVID-19, com tabela de características própria por estrato.
+# Tudo o resto é herdado de diagnostico_lra.yaml (alterações lá refletem-se aqui).
+#   python -m selpop estudos/diagnostico_lra_covid.yaml --saida resultados/diagnostico_lra_covid.xlsx
+# =====================================================================
+base: diagnostico_lra.yaml
+
+estratificar:
+  col: COVID
+  estratos:
+    - {valor: 1, rotulo: "doentes COVID-19", rotulo_en: "COVID-19 patients", sufixo: COVpos}
+    - {valor: 0, rotulo: "doentes sem COVID-19", rotulo_en: "non-COVID-19 patients", sufixo: COVneg}
+
+saida:
+  ficheiro: "../resultados/diagnostico_lra_covid.xlsx"

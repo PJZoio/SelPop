@@ -106,6 +106,9 @@ def write(R: dict, out_path: str | Path, pub_lang: str = "en"):
     leia = [("Estudo", meta["estudo"]), ("Descrição", meta["descricao"]), ("Gerado em", meta["gerado_em"]),
             ("Versão selpop", meta["versao"]), ("Semente aleatória", meta["semente"]), ("α", meta["alfa"]),
             ("Casos", names[0]), ("Controlos", names[1])]
+    est = R["cfg"].get("estudo", {}).get("estrato")
+    if est:
+        leia.append(("Estrato", f"{est['rotulo']} ({est['col']} = {est['valor']}); seleção, emparelhamento e testes feitos só dentro deste estrato"))
     for p in meta["proveniencia"]:
         leia.append(("Ficheiro de entrada", f"{p['ficheiro']} [folha {p['folha']}; {p['linhas']} linhas] SHA-256 {p['sha256'][:16]}… {p.get('nota', '')}"))
     leia += [("", "")] + METODOS

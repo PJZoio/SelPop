@@ -11,6 +11,8 @@ def test_app_survives_stale_selpop_modules():
     saved = old.explorar
     try:
         del old.explorar                       # simula a versão antiga em memória
+        import selpop
+        selpop._src_hash = "versao-antiga"     # (a versão antiga corresponde a outro código em disco)
         at = st_testing.AppTest.from_file(str(Path(__file__).resolve().parents[1] / "app.py"), default_timeout=300)
         at.run()
         assert not at.exception, [e.message for e in at.exception]
