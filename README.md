@@ -49,7 +49,7 @@ branco*). Depois seguem-se os passos:
 |---|---|
 | **1 · Colunas** | Indicar a coluna do ID (obrigatória) e, se existirem, data, nº de amostra, idade, sexo e creatinina. Com estas, a ferramenta calcula variáveis derivadas (ex.: TFGe). Há campos opcionais para bases de UCI (admissão, VMI, ECMO, SOFA). |
 | **2 · Grupos** | Definir casos e controlos. O **assistente rápido** faz isto escolhendo a coluna que separa os grupos e os valores; critérios mais finos escrevem-se como expressões. O funil mostra, em tempo real, quantos participantes ficam após cada critério. |
-| **3 · Emparelhamento** | Controlos por caso, suplentes, variáveis de emparelhamento (exato e calibres) e reequilíbrio automático. |
+| **3 · Emparelhamento** | Controlos por caso, suplentes, variáveis de emparelhamento (exato e calibres), reequilíbrio automático e estratificação opcional. |
 | **4 · Variáveis** | Variáveis a comparar, o tipo (sugerido automaticamente) e o papel de cada uma (confundidor, preditor, interferente). |
 | **5 · Escolha dos testes** | Diagnóstico de cada variável, teste recomendado com justificação, histogramas e gráficos Q–Q; possibilidade de escolher outro teste. |
 | **6 · Resultados** | Números finais, tabela para o artigo, comparação detalhada, gráfico de equilíbrio, lista de amostras e botões para descarregar. |
@@ -102,6 +102,24 @@ python -m selpop.consolidar estudos/prognostico_lra.yaml estudos/diagnostico_lra
 `--publicacao` grava a tabela de características em Word (`--lingua en|pt`, inglês por omissão); `--sav` grava
 os dados em SPSS e a sintaxe de validação. `selpop.consolidar` junta vários estudos num só Excel, com a lista
 única de amostras a pedir ao biobanco.
+
+### Seleção estratificada
+
+`--estratificar COLUNA` (ou, no YAML, `estratificar: {col: COLUNA}`; ou, na app, *Estratificar por* no passo 3)
+repete a seleção completa dentro de cada valor da coluna: critérios, emparelhamento, reequilíbrio e testes. Cada
+estrato tem as suas folhas no Excel (ex.: `M1-COVpos_Publicacao`) e a sua tabela de características; a variável de
+estrato sai da tabela (é constante dentro do estrato). Um YAML pode herdar de outro com `base: outro.yaml` e mudar
+só o que precisa — é o caso das variantes por COVID-19:
+
+```bash
+python -m selpop.consolidar estudos/prognostico_lra_covid.yaml estudos/diagnostico_lra_covid.yaml \
+    estudos/diagnostico_drc_covid.yaml --rotulos M1 M2 M3 --saida resultados/Selecao_estratificada_COVID.xlsx
+```
+
+Emparelhar exatamente por uma variável não é o mesmo que estratificar: no emparelhamento, as etapas mais
+permissivas podem juntar caso e controlo de estratos diferentes, e os testes juntam os estratos; na
+estratificação, nada cruza estratos. O preço são grupos mais pequenos — estratos com poucos casos servem para
+descrição ou análise conjunta ajustada, não para um modelo próprio.
 
 ## Saídas
 
@@ -167,8 +185,8 @@ Calculadas só se as colunas necessárias estiverem mapeadas.
 
 ```
 app.py                 interface (Streamlit)
-selpop/                biblioteca: io, derive, cohort, match, stats, report, publish, consolidar, pipeline
-estudos/*.yaml         configurações (exemplo genérico; estudos de UCI)
+selpop/                biblioteca: io, derive, cohort, match, stats, report, publish, consolidar, estratos, pipeline
+estudos/*.yaml         configurações (exemplo genérico; estudos de UCI e variantes estratificadas por COVID-19)
 exemplos/              base de exemplo fictícia
 scripts/               gerar a base de exemplo
 tests/                 testes automáticos (python -m pytest tests -q)

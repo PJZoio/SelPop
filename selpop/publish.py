@@ -195,7 +195,11 @@ def build_table(R: dict, lang: str = "en", smd: bool = False) -> tuple[pd.DataFr
         out.extend(by_sec[s])
     df = pd.DataFrame(out)
     an, bn = group_names(R, lang)
-    meta = {"title": (T["title"] if R["cfg"].get("emparelhamento") else T["title_nm"]).format(a=an, b=bn),
+    title = (T["title"] if R["cfg"].get("emparelhamento") else T["title_nm"]).format(a=an, b=bn)
+    est = R["cfg"].get("estudo", {}).get("estrato")
+    if est:
+        title += f" — {est['rotulo_en'] if lang == 'en' else est['rotulo']}"
+    meta = {"title": title,
             "col_a": f"{an[:1].upper() + an[1:]} (n = {len(a)})", "col_b": f"{bn[:1].upper() + bn[1:]} (n = {len(b)})", "notes": _notes(R, lang, used_tests, missing, smd,
                                                                                                 any(r["tipo"] == "secao" and r["Variável"] == SECTIONS["preditores"][lang] for r in out))}
     if not smd:

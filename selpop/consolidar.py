@@ -16,26 +16,37 @@ from openpyxl import load_workbook
 from openpyxl.styles import Font, PatternFill
 
 from .io import load
+from .estratos import expand, with_strata
 from .pipeline import load_config, prep_key_of, prepare, select
 from .report import FILL_IN, FLAG, METODOS, F, _sel_rows, _style
 
 FILL_ROW = {"caso": PatternFill("solid", fgColor="FCE4D6"), "controlo": PatternFill("solid", fgColor="DDEBF7")}
 
 
-def run_many(cfg_paths: list[Path], log=print) -> list[dict]:
-    """Corre os estudos reaproveitando a base preparada quando a preparação é igual."""
+def run_many(cfg_paths: list[Path], log=print, estratificar: str | None = None) -> list[dict]:
+    """Corre os estudos reaproveitando a base preparada quando a preparação é igual.
+    Um estudo estratificado devolve um resultado por estrato (R["estrato"] identifica-o)."""
     cache, out = {}, []
-    for p in cfg_paths:
-        cfg = load_config(p)
+    for i, p in enumerate(cfg_paths):
+        cfg = with_strata(load_config(p), estratificar)
         k = prep_key_of(cfg)
         if k not in cache:
             raw, prov = load(cfg, p.parent)
             df, qc = prepare(cfg, raw)
             cache[k] = (df, qc, prov)
         df, qc, prov = cache[k]
-        log(f"A correr {cfg['estudo'].get('nome', p.stem)}…")
-        out.append(select(cfg, df.copy(), qc, prov, log=lambda *_: None))
+        for suf, c in expand(cfg, df):
+            log(f"A correr {c['estudo'].get('nome', p.stem)}…")
+            R = select(c, df.copy(), qc, prov, log=lambda *_: None)
+            R["estudo_idx"], R["estrato"] = i, (c["estudo"].get("estrato") if suf else None)
+            out.append(R)
     return out
+
+
+def labels_for(Rs, labels) -> list[str]:
+    """Rótulo por resultado: o do estudo, com o sufixo do estrato quando estratificado (ex.: M1-COVpos)."""
+    return [labels[R.get("estudo_idx", i)] + (f"-{R['estrato']['sufixo']}" if R.get("estrato") else "")
+            for i, R in enumerate(Rs)]
 
 
 def _stage_roles(spec) -> dict:
@@ -58,7 +69,7 @@ def summary(Rs, labels) -> pd.DataFrame:
         m = R["match"]
         idc = R["cfg"]["dados"]["id"]
         rows.append({
-            "Modelo": lab, "Estudo": R["meta"]["estudo"],
+            "Modelo": lab, "Estudo": R["meta"]["estudo"], "Estrato": (R.get("estrato") or {}).get("rotulo", "—"),
             "Casos": R["names"][0], "Controlos": R["names"][1],
             "Casos elegíveis": len(R["cases"]), "Casos emparelhados": int(R["sel_cases"][idc].nunique()),
             "Controlos principais": len(R["sel_ctrl"]), "Suplentes": int((m.papel == "suplente").sum()) if len(m) else 0,
@@ -138,12 +149,20 @@ def write_many(Rs, labels, out_path: Path, intro: list[tuple[str, str]] | None =
     leia = [("Objetivo", "Seleção das amostras do biobanco UCI a medir no miniNIR (e FT-NIR) para os modelos abaixo, "
                          "com os respetivos controlos, a tabela de comparação de cada modelo e a lista única de amostras a pedir.")]
     if intro is None:
-        intro = []
+        intro, seen = [], set()
         for lab, R in zip(labels, Rs):
             e = R["cfg"]["estudo"]
             intro.append((e.get('nome', lab), e.get("descricao", "")))
+            k = R.get("estudo_idx", lab)
+            if k in seen:          # notas do estudo só uma vez (não repetir por estrato)
+                continue
+            seen.add(k)
             for n in e.get("notas", []) or []:
-                intro.append((f"{lab} — nota", n))
+                intro.append((f"{lab.split('-')[0]} — nota", n))
+        if any(R.get("estrato") for R in Rs):
+            intro.append(("Estratificação", "Seleção repetida dentro de cada estrato (critérios, emparelhamento, reequilíbrio e testes): "
+                                            "nenhum par caso–controlo cruza estratos e cada estrato tem a sua tabela. Estratos com "
+                                            "menos de 10 casos servem para descrição, não para um modelo próprio."))
     leia += intro
     leia += [("Gerado em", meta["gerado_em"]), ("Versão selpop", meta["versao"])]
     for p in meta["proveniencia"]:
@@ -243,10 +262,12 @@ def main(argv=None):
     ap.add_argument("--lingua", choices=["en", "pt"], default="en", help="língua da tabela de publicação (por omissão: en)")
     ap.add_argument("--publicacao", action="store_true", help="gravar também a tabela de características de cada modelo em Word (.docx)")
     ap.add_argument("--sav", action="store_true", help="gravar também os dados de cada modelo em SPSS (.sav) + sintaxe de validação (.sps)")
+    ap.add_argument("--estratificar", metavar="COLUNA", help="repetir a seleção dentro de cada estrato desta coluna (ex.: COVID)")
     a = ap.parse_args(argv)
     paths = [Path(c).resolve() for c in a.configs]
     labels = a.rotulos or [f"M{i + 1}" for i in range(len(paths))]
-    Rs = run_many(paths)
+    Rs = run_many(paths, estratificar=a.estratificar)
+    labels = labels_for(Rs, labels)
     info = write_many(Rs, labels, Path(a.saida), pub_lang=a.lingua)
     out_dir = Path(a.saida).parent
     from .publish import write_docx, write_sav, write_sps

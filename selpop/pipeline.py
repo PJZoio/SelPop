@@ -17,9 +17,27 @@ from .match import match
 from .stats import table1
 
 
+def _merge(base: dict, over: dict) -> dict:
+    """Sobreposição recursiva de dicionários (listas e valores simples são substituídos)."""
+    out = copy.deepcopy(base)
+    for k, v in over.items():
+        out[k] = _merge(out[k], v) if isinstance(v, dict) and isinstance(out.get(k), dict) else copy.deepcopy(v)
+    return out
+
+
 def load_config(path: str | Path) -> dict:
+    """Lê o YAML. Com `base: outro.yaml`, parte dessa configuração e sobrepõe o resto
+    (os caminhos de dados mantêm-se relativos à pasta do ficheiro base, que deve ser a mesma)."""
+    path = Path(path)
     with open(path, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        cfg = yaml.safe_load(f) or {}
+    b = cfg.pop("base", None)
+    if b:
+        bp = (path.parent / b).resolve()
+        if bp.parent != path.parent.resolve():
+            raise ValueError(f"'base: {b}' tem de estar na mesma pasta que {path.name}")
+        cfg = _merge(load_config(bp), cfg)
+    return cfg
 
 
 def _balance_vars(cfg):

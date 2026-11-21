@@ -7,7 +7,9 @@ import warnings
 import pandas as pd
 from pathlib import Path
 
-from .pipeline import load_config, run
+from .estratos import expand, with_strata
+from .io import load
+from .pipeline import load_config, prepare, select
 from .report import write
 
 
@@ -19,12 +21,24 @@ def main(argv=None):
     ap.add_argument("--lingua", choices=["en", "pt"], default="en", help="língua da tabela de publicação (por omissão: en)")
     ap.add_argument("--publicacao", action="store_true", help="gravar também a tabela de características em Word (.docx)")
     ap.add_argument("--sav", action="store_true", help="gravar também os dados em SPSS (.sav) + sintaxe de validação (.sps)")
+    ap.add_argument("--estratificar", metavar="COLUNA", help="repetir a seleção dentro de cada estrato desta coluna (ex.: COVID); um Excel por estrato")
     a = ap.parse_args(argv)
     cfg_path = Path(a.config).resolve()
-    cfg = load_config(cfg_path)
-    R = run(cfg, cfg_path.parent)
-    out = Path(a.saida) if a.saida else cfg_path.parent / cfg.get("saida", {}).get("ficheiro", "selecao.xlsx")
-    out.parent.mkdir(parents=True, exist_ok=True)
+    cfg = with_strata(load_config(cfg_path), a.estratificar)
+    raw, prov = load(cfg, cfg_path.parent)
+    print(f"Base: {len(raw)} linhas, {raw[cfg['dados']['id']].nunique()} doentes")
+    df, qc = prepare(cfg, raw)
+    out0 = Path(a.saida) if a.saida else cfg_path.parent / cfg.get("saida", {}).get("ficheiro", "selecao.xlsx")
+    out0.parent.mkdir(parents=True, exist_ok=True)
+    for suf, c in expand(cfg, df):
+        if suf:
+            print(f"\n=== Estrato: {c['estudo']['estrato']['rotulo']} ===")
+        R = select(c, df.copy(), qc, prov)
+        out = out0.with_name(f"{out0.stem}_{suf}{out0.suffix}") if suf else out0
+        _write_all(R, out, a)
+
+
+def _write_all(R, out, a):
     info = write(R, out, pub_lang=a.lingua)
     from .publish import write_docx, write_sav, write_sps
     if a.publicacao:
