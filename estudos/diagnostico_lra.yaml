@@ -97,6 +97,7 @@ grupos:
 
 emparelhamento:
   razao: 2                  # controlos principais por caso
+  algoritmo: otimo            # por rondas (1.º controlo para todos, depois o 2.º, depois suplentes), atribuição ótima; "guloso" = v0.6
   suplentes_por_caso: 1
   casos_sem_controlo: excluir
   etapas:                   # aplicadas por ordem aos casos que ainda não completaram a razão
@@ -107,7 +108,7 @@ emparelhamento:
     ativo: true
     max_iter: 3
     fator_calibre: 0.5      # calibre para contínuas acrescentadas = 0,5 × desvio-padrão
-    candidatas: [sofa_nao_renal_nao_cv_dia, em_vmi_dia, VMI, DIABETES, HTA, OBESIDADE, IMC]
+    candidatas: [IDADE, COVID, sofa_nao_renal_nao_cv_dia, em_vmi_dia, VMI, DIABETES, HTA, OBESIDADE, IMC]
 
 equilibrio:
   alfa: 0.05

@@ -125,7 +125,7 @@ descrição ou análise conjunta ajustada, não para um modelo próprio.
 
 | Saída | Conteúdo |
 |---|---|
-| Excel | LEIA-ME (métodos e ficheiros de entrada com SHA-256), Funil, Qualidade_dados, Comparacao_grupos, Tabela_publicacao, Equilibrio_antes_depois, Selecao (com colunas para o biobanco), Suplentes, Casos_sem_controlo, Iteracoes, Config |
+| Excel | LEIA-ME (métodos e ficheiros de entrada com SHA-256), Funil, Rastreabilidade (todas as linhas da base com as colunas dos cálculos — KDIGO passo a passo, janelas — e o destino de cada linha: critério em que falhou ou papel na seleção), Qualidade_dados, Comparacao_grupos, Tabela_publicacao, Equilibrio_antes_depois, Selecao (com colunas para o biobanco), Suplentes, Casos_sem_controlo, Iteracoes, Config |
 | Word | Tabela de características: secções, mediana [IIQ] ou n (%), n por grupo, p com a letra do teste, notas de rodapé (testes, emparelhamento, dados em falta). Sem numeração: o número da tabela é dado no artigo. |
 | `.sav` | Amostras selecionadas com `grupo` (1 = caso), `conjunto` (ID do caso emparelhado) e as variáveis comparadas, com rótulos. |
 | `.sps` | Sintaxe SPSS/PSPP que repete os testes. Comparar com *Pearson Chi-Square*, *Fisher's Exact Test* e *Equal variances assumed* (ou *not assumed* para Welch). |
@@ -166,10 +166,16 @@ Calculadas só se as colunas necessárias estiverem mapeadas.
   configurável; sem correção para comparações múltiplas (tabela descritiva).
 - **SMD** (diferença média padronizada): não depende do tamanho da amostra — com grupos pequenos, "p ≥ α" não
   demonstra equilíbrio. Referência: |SMD| < 0,1.
-- **Emparelhamento**: guloso global sem reposição, por etapas (exato + calibres), desempate aleatório com semente
-  fixa. Não é ótimo no sentido estrito, mas é transparente e reprodutível.
+- **Emparelhamento** (`algoritmo: otimo`, por omissão desde a v0.7): sem reposição, por **rondas** — primeiro um
+  controlo para cada caso, depois o 2.º, depois os suplentes — e, em cada ronda e etapa, **atribuição ótima**
+  (algoritmo húngaro): o maior número de casos com controlo e, entre essas soluções, o menor custo total. Desempates
+  com semente fixa. `algoritmo: guloso` reproduz as seleções até à v0.6 (que podiam deixar casos sem controlo
+  enquanto outros recebiam 2 controlos + suplente); `rondas` usa rondas com atribuição gulosa.
 - **Reequilíbrio**: se um confundidor candidato tiver p < α, é acrescentado ao emparelhamento (contínua →
-  calibre de 0,5 DP; categórica → exato); fica a iteração com menos confundidores diferentes.
+  calibre de 0,5 DP, ou ×0,6 se já tinha um calibre igual ou mais apertado; categórica → exato); fica a iteração com
+  menos confundidores diferentes e, em empate, a com mais casos. Todas as iterações ficam na folha de iterações:
+  se preferir mais casos com um desequilíbrio pequeno (a ajustar na análise), está lá a alternativa. Para a fixar,
+  `reequilibrar: {iteracao: N}` no YAML.
 
 ## Limitações e cuidados
 

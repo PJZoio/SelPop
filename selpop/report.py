@@ -6,6 +6,8 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import yaml
+
+from .rastreio import write_trace
 from openpyxl import load_workbook
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 
@@ -18,12 +20,12 @@ FILL_IN = PatternFill("solid", fgColor="FFF2CC")
 
 METODOS = [
     ("Objetivo", "Selecionar, de forma reprodutível, a população-alvo (casos) e os controlos a partir da base, com o dia/amostra-índice de cada doente, e documentar o equilíbrio entre grupos."),
-    ("Pipeline", "1) carregar base e ficheiros auxiliares; 2) derivar variáveis por dia e por doente; 3) aplicar critérios de doente e de dia a cada grupo; 4) escolher o dia-índice dos casos; 5) emparelhar controlos por etapas; 6) tabela de comparação com testes e SMD; 7) opcionalmente reequilibrar acrescentando ao emparelhamento a variável com menor p; 8) exportar."),
-    ("Emparelhamento", "Guloso global sem reposição: todos os pares caso–(doente-dia controlo) admissíveis (igualdade nas variáveis 'exato', diferença ≤ calibre nas restantes) ordenados por custo = Σ|diferença|/calibre, com desempate aleatório reprodutível (semente). Cada doente-controlo é usado uma vez. Casos que não completam a razão passam à etapa seguinte, mais permissiva. Os primeiros controlos de cada caso (até à razão) são 'principais'; os seguintes são 'suplentes'."),
+    ("Pipeline", "1) carregar base e ficheiros auxiliares; 2) derivar variáveis por dia e por doente; 3) aplicar critérios de doente e de dia a cada grupo; 4) escolher o dia-índice dos casos; 5) emparelhar controlos por etapas; 6) tabela de comparação com testes e SMD; 7) opcionalmente reequilibrar acrescentando ao emparelhamento a variável com menor p (contínua: calibre de 0,5 DP, ou ×0,6 se já tinha um calibre igual ou mais apertado; categórica: exato) e escolher a iteração com menos confundidores com p < α, depois com mais casos; 8) exportar."),
+    ("Emparelhamento", "Sem reposição, por rondas e etapas (algoritmo 'otimo', por omissão desde a v0.7): na ronda 1 cada caso recebe o seu 1.º controlo, na ronda 2 o 2.º, e só depois os suplentes. Em cada ronda percorrem-se as etapas (da mais exigente à mais permissiva); um par é admissível com igualdade nas variáveis 'exato' e diferença ≤ calibre nas restantes, com custo = Σ|diferença|/calibre. Em cada etapa a atribuição é ótima (algoritmo húngaro): o maior número possível de casos recebe um controlo e, entre essas soluções, a de menor custo total; para cada par usa-se o dia do doente-controlo com menor custo. Desempates aleatórios reprodutíveis (semente). Cada doente-controlo é usado uma vez. Controlos das rondas 1..razão são 'principais'; os seguintes, 'suplentes'. Alternativas: 'rondas' (rondas com atribuição gulosa) e 'guloso' (v0.6: guloso global, que podia completar 2 controlos + suplente de uns casos antes de outros terem algum)."),
     ("Testes (como nos artigos do grupo)", "Contínuas: mediana (P25–P75); Shapiro–Wilk em cada grupo → t de Student (variâncias iguais) se ambos normais, senão Mann–Whitney U (aproximação normal com correção de empates, sem correção de continuidade, como no SPSS/PSPP). Categóricas: n (%); qui-quadrado, ou exato de Fisher se alguma frequência esperada < 5. Bilateral; α definido na configuração. Sem correção para comparações múltiplas (tabela descritiva)."),
     ("SMD", "Diferença média padronizada (para categóricas com >2 níveis, o maior |SMD| entre níveis). Não depende de n: com grupos pequenos, 'p ≥ α' não demonstra equilíbrio, e o SMD ajuda a ver diferenças relevantes que o teste não deteta. Referência habitual: |SMD| < 0,1."),
     ("TFGe", "CKD-EPI 2021 sem coeficiente de raça. Em UCI a creatinina não está em estado estacionário e a perda muscular sobrestima a TFGe: usar como descritiva. 'tfge_basal_proxy' usa a creatinina mínima do internamento."),
-    ("LRA (KDIGO, critério de creatinina)", "Subida: creatinina máx. do dia ≥1,5× o mínimo dos 7 dias anteriores (incl. o dia) ou ≥0,3 mg/dL acima do mínimo das 48 h anteriores. Presente na admissão: nos primeiros dias, creatinina ≥1,5× o nadir dos 7 dias seguintes. Estádio 1/2/3 pelo rácio face ao basal (1,5–1,9 / 2,0–2,9 / ≥3,0 ou ≥4,0 mg/dL). Aproximação: não há débito urinário nem creatinina pré-admissão; comparações entre valores diários."),
+    ("LRA (KDIGO, critério de creatinina)", "Subida: creatinina máx. do dia ≥1,5× o mínimo dos 7 dias anteriores (incl. o dia) ou ≥0,3 mg/dL acima do mínimo das 48 h anteriores. Presente na admissão: nos primeiros dias, creatinina ≥1,5× o nadir dos 7 dias seguintes. Os valores intermédios de cada dia estão na folha Rastreabilidade. Estádio 1/2/3 pelo rácio face ao basal (1,5–1,9 / 2,0–2,9 / ≥3,0 ou ≥4,0 mg/dL). Aproximação: não há débito urinário nem creatinina pré-admissão; comparações entre valores diários."),
     ("Limitações", "Seleção condicionada aos dados registados; variáveis não registadas (ex.: medicação, débito urinário) não são equilibradas. Reequilibrar por p-valores aumenta o número de testes; a decisão final sobre as variáveis de emparelhamento deve ser científica, não só estatística."),
 ]
 
@@ -117,6 +119,7 @@ def write(R: dict, out_path: str | Path, pub_lang: str = "en"):
         pd.DataFrame(leia, columns=["Item", "Descrição"]).to_excel(xw, sheet_name="LEIA-ME", index=False)
         R["funil"].to_excel(xw, sheet_name="Funil", index=False)
         R["qc"].to_excel(xw, sheet_name="Qualidade_dados", index=False)
+        write_trace(xw, [R], [""])
         ta.drop(columns="_k").to_excel(xw, sheet_name="Comparacao_grupos", index=False, startrow=2)
         eq.to_excel(xw, sheet_name="Equilibrio_antes_depois", index=False)
         sel.to_excel(xw, sheet_name="Selecao", index=False)

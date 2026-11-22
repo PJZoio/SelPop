@@ -39,10 +39,15 @@ def in_period(day, start, end, flag=None):
     return r
 
 
-def _kdigo_patient(t, hi, lo, dias_admissao):
+def _kdigo_patient(t, hi, lo, dias_admissao, detail=None):
+    """Critério de creatinina KDIGO por dia. Se `detail` for um dicionário, recebe os valores intermédios
+    (para rastreabilidade): mínimo dos 7 dias anteriores, razão, mínimo das 48 h, subida em 48 h, e o teste de
+    LRA na admissão (máximo do dia vs. nadir dos 7 dias seguintes)."""
     n = len(t)
     crit = np.zeros(n, bool)
     stage = np.zeros(n, int)
+    B7, R7, B2, D2 = (np.full(n, np.nan) for _ in range(4))
+    AN, AR = np.full(n, np.nan), np.full(n, np.nan)
     for i in range(n):
         if np.isnan(hi[i]):
             continue
@@ -51,6 +56,7 @@ def _kdigo_patient(t, hi, lo, dias_admissao):
         b7 = np.nanmin(lo[m7]) if np.isfinite(lo[m7]).any() else np.nan
         b2 = np.nanmin(lo[m2]) if np.isfinite(lo[m2]).any() else np.nan
         r = hi[i] / b7 if b7 and np.isfinite(b7) else np.nan
+        B7[i], R7[i], B2[i], D2[i] = b7, r, b2, hi[i] - b2 if np.isfinite(b2) else np.nan
         c = (np.isfinite(r) and r >= 1.5) or (np.isfinite(b2) and hi[i] - b2 >= 0.3)
         if c:
             crit[i] = True
@@ -64,8 +70,13 @@ def _kdigo_patient(t, hi, lo, dias_admissao):
                 continue
             f7 = lo[(t >= t[i]) & (t <= t[i] + D(7))]
             f7 = f7[np.isfinite(f7)]
+            if len(f7):
+                AN[i], AR[i] = f7.min(), hi[i] / f7.min() if f7.min() else np.nan
             if len(f7) and hi[i] >= 1.5 * f7.min():
                 adm = True
+    if detail is not None:
+        detail.update(cr_min_7d_antes=B7, razao_7d=R7, cr_min_48h_antes=B2, subida_48h=D2,
+                      adm_nadir_7d_seguintes=AN, adm_razao=AR)
     return crit, stage, adm
 
 
@@ -157,7 +168,10 @@ def _lra_block(df, cfg, idc, dt, crmax, crmin):
     for pid, idx in df.groupby(idc).indices.items():
         g = df.iloc[idx]
         t = g[dt].values
-        crit, stage, adm = _kdigo_patient(t, crmax[idx], crmin[idx], lra_cfg.get("dias_admissao", 2))
+        det = {}
+        crit, stage, adm = _kdigo_patient(t, crmax[idx], crmin[idx], lra_cfg.get("dias_admissao", 2), detail=det)
+        for kk, vv in det.items():
+            df.loc[g.index, f"kdigo_{kk}"] = vv
         df.loc[g.index, "lra_dia"] = crit
         df.loc[g.index, "lra_estadio_dia"] = stage
         onset = t[crit.argmax()] if crit.any() else np.datetime64("NaT")

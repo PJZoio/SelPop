@@ -88,6 +88,7 @@ def build_groups(df: pd.DataFrame, cfg: dict, rng: np.random.Generator):
         funil.append({"Grupo": G["controlos"].get("nome", "controlos"), "Passo": "Removidos por também serem casos",
                       "Doentes": int(out["controlos"][idc].nunique()), "Dias/amostras": int(len(out["controlos"]))})
 
+    out["casos"]["_linha"] = out["casos"].index          # linha original da base (rastreabilidade)
     cases = out["casos"].groupby(idc, group_keys=False).apply(lambda g: pick_index(g, G["casos"].get("indice"), rng))
     cases = cases.reset_index(drop=True) if idc in cases.columns else cases.reset_index()
     funil.append({"Grupo": G["casos"].get("nome", "casos"),
