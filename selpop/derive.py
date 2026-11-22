@@ -23,6 +23,13 @@ from .io import to_num
 D = lambda n: np.timedelta64(int(n), "D")
 
 
+def _r6(x: float) -> float:
+    """Arredonda a 6 casas como o ROUND do Excel (metade para longe de zero), para as fórmulas da folha de
+    rastreabilidade darem exatamente o mesmo valor."""
+    from decimal import ROUND_HALF_UP, Decimal
+    return float(Decimal(repr(float(x))).quantize(Decimal("1e-6"), rounding=ROUND_HALF_UP))
+
+
 def ckdepi2021(scr, age, female):
     scr, age, female = np.asarray(scr, float), np.asarray(age, float), np.asarray(female, bool)
     k = np.where(female, 0.7, 0.9)
@@ -55,9 +62,11 @@ def _kdigo_patient(t, hi, lo, dias_admissao, detail=None):
         m2 = (t >= t[i] - D(2)) & (t <= t[i])
         b7 = np.nanmin(lo[m7]) if np.isfinite(lo[m7]).any() else np.nan
         b2 = np.nanmin(lo[m2]) if np.isfinite(lo[m2]).any() else np.nan
-        r = hi[i] / b7 if b7 and np.isfinite(b7) else np.nan
-        B7[i], R7[i], B2[i], D2[i] = b7, r, b2, hi[i] - b2 if np.isfinite(b2) else np.nan
-        c = (np.isfinite(r) and r >= 1.5) or (np.isfinite(b2) and hi[i] - b2 >= 0.3)
+        # arredondado a 6 casas antes de comparar: sem isto, 1,2 − 0,9 = 0,29999999999999993 falharia o "≥ 0,3"
+        r = _r6(hi[i] / b7) if b7 and np.isfinite(b7) else np.nan
+        d2 = _r6(hi[i] - b2) if np.isfinite(b2) else np.nan
+        B7[i], R7[i], B2[i], D2[i] = b7, r, b2, d2
+        c = (np.isfinite(r) and r >= 1.5) or (np.isfinite(d2) and d2 >= 0.3)
         if c:
             crit[i] = True
             stage[i] = 3 if (np.isfinite(r) and r >= 3) or hi[i] >= 4.0 else 2 if (np.isfinite(r) and r >= 2) else 1
@@ -71,8 +80,8 @@ def _kdigo_patient(t, hi, lo, dias_admissao, detail=None):
             f7 = lo[(t >= t[i]) & (t <= t[i] + D(7))]
             f7 = f7[np.isfinite(f7)]
             if len(f7):
-                AN[i], AR[i] = f7.min(), hi[i] / f7.min() if f7.min() else np.nan
-            if len(f7) and hi[i] >= 1.5 * f7.min():
+                AN[i], AR[i] = f7.min(), _r6(hi[i] / f7.min()) if f7.min() else np.nan
+            if np.isfinite(AR[i]) and AR[i] >= 1.5:
                 adm = True
     if detail is not None:
         detail.update(cr_min_7d_antes=B7, razao_7d=R7, cr_min_48h_antes=B2, subida_48h=D2,

@@ -125,7 +125,7 @@ descrição ou análise conjunta ajustada, não para um modelo próprio.
 
 | Saída | Conteúdo |
 |---|---|
-| Excel | LEIA-ME (métodos e ficheiros de entrada com SHA-256), Funil, Rastreabilidade (todas as linhas da base com as colunas dos cálculos — KDIGO passo a passo, janelas — e o destino de cada linha: critério em que falhou ou papel na seleção), Qualidade_dados, Comparacao_grupos, Tabela_publicacao, Equilibrio_antes_depois, Selecao (com colunas para o biobanco), Suplentes, Casos_sem_controlo, Iteracoes, Config |
+| Excel | LEIA-ME (métodos e ficheiros de entrada com SHA-256), Funil, Rastreabilidade (todas as linhas da base com as colunas dos cálculos — KDIGO passo a passo, janelas, TFGe — como fórmulas Excel recalculadas ao abrir, e o destino de cada linha: critério em que falhou ou papel na seleção; requer Excel 2019/365 ou LibreOffice, por usar MINIFS/MAXIFS), Qualidade_dados, Comparacao_grupos, Tabela_publicacao, Equilibrio_antes_depois, Selecao (com colunas para o biobanco), Suplentes, Casos_sem_controlo, Iteracoes, Config |
 | Word | Tabela de características: secções, mediana [IIQ] ou n (%), n por grupo, p com a letra do teste, notas de rodapé (testes, emparelhamento, dados em falta). Sem numeração: o número da tabela é dado no artigo. |
 | `.sav` | Amostras selecionadas com `grupo` (1 = caso), `conjunto` (ID do caso emparelhado) e as variáveis comparadas, com rótulos. |
 | `.sps` | Sintaxe SPSS/PSPP que repete os testes. Comparar com *Pearson Chi-Square*, *Fisher's Exact Test* e *Equal variances assumed* (ou *not assumed* para Welch). |
