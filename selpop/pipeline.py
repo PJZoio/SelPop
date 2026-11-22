@@ -120,6 +120,9 @@ def select(cfg: dict, df: pd.DataFrame, qc: pd.DataFrame, prov: list[dict], log=
                 if worst.get("tipo", "continua") == "continua":
                     sd = float(pd.to_numeric(pool[col], errors="coerce").std())
                     w = max(round(float(reeq.get("fator_calibre", 0.5)) * sd, 2), 1e-6)
+                    cur = (s.get("calibre") or {}).get(col)
+                    if cur is not None and cur <= w:      # já tem calibre igual/mais apertado: aperta mais (×0,6)
+                        w = max(round(cur * 0.6, 2), 1e-6)
                     s.setdefault("calibre", {})
                     s["calibre"] = {**(s["calibre"] or {}), col: w}
                 else:
@@ -127,6 +130,11 @@ def select(cfg: dict, df: pd.DataFrame, qc: pd.DataFrame, prov: list[dict], log=
             log(f"Reequilíbrio: iteração {it + 1} acrescenta {col} ao emparelhamento")
         # melhor iteração: menos variáveis significativas, depois mais casos emparelhados, depois a mais cedo
         best = min(range(len(results)), key=lambda i: (iters[i]["N.º confundidores com p < α"], -iters[i]["Casos emparelhados"], i))
+        forced = reeq.get("iteracao") if spec else None
+        if forced is not None:                      # escolha explícita do investigador (fica registada no YAML)
+            if not 0 <= int(forced) < len(results):
+                raise ValueError(f"reequilibrar.iteracao = {forced}, mas só há iterações 0–{len(results) - 1}")
+            best = int(forced)
         for i, r in enumerate(iters):
             r["Escolhida"] = "Sim" if i == best else ""
         m, sel_cases, sel_ctrl, t_after, spec_used = results[best]

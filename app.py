@@ -501,6 +501,13 @@ with tabs[2]:
                        key=f"pol_{V}", help="'excluir' retira-os da comparação; ficam listados à parte.")
     seed = e4.number_input("Semente aleatória", value=int(base_cfg["estudo"].get("semente", 12345)), step=1, key=f"seed_{V}",
                            help="Garante que a mesma configuração dá sempre a mesma seleção.")
+    alg_lab = {"otimo": "Por rondas, ótimo (recomendado)", "rondas": "Por rondas, guloso", "guloso": "Guloso global (v0.6)"}
+    alg0 = emp0.get("algoritmo", "otimo") if emp0.get("algoritmo", "otimo") in alg_lab else "otimo"
+    alg = st.selectbox("Algoritmo de emparelhamento", list(alg_lab), index=list(alg_lab).index(alg0), format_func=alg_lab.get,
+                       key=f"alg_{V}",
+                       help="Por rondas: primeiro um controlo para cada caso, depois o 2.º, depois os suplentes — assim nenhum caso fica "
+                            "sem controlo por outros terem recebido vários. 'Ótimo' escolhe, em cada ronda, a combinação de pares que "
+                            "emparelha mais casos com a menor distância total. 'Guloso global' reproduz seleções antigas.")
     st.markdown("**Etapas** — aplicadas por ordem aos casos ainda sem controlos suficientes. "
                 "*Exato*: colunas separadas por vírgula (valor igual). *Calibres*: `coluna=largura` separados por `;` (diferença máxima).")
     init_st = ss.init_stages if len(ss.init_stages) else pd.DataFrame([{"Exato": mapping.get("sexo", ""),
@@ -574,7 +581,7 @@ def current_cfg() -> dict:
     if rule == "alvo":
         ind["alvo"] = float(ralvo)
     cfg["grupos"]["casos"]["indice"] = ind
-    cfg["emparelhamento"] = {"razao": int(razao), "suplentes_por_caso": int(nsup), "casos_sem_controlo": pol,
+    cfg["emparelhamento"] = {"razao": int(razao), "suplentes_por_caso": int(nsup), "casos_sem_controlo": pol, "algoritmo": alg,
                              "etapas": df_to_stages(stages_df),
                              "reequilibrar": {"ativo": bool(reeq_on), "max_iter": int(maxit), "fator_calibre": float(fator),
                                               "candidatas": list(cands)}} if use_match else None

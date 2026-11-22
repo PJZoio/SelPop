@@ -39,6 +39,7 @@ grupos:
 
 emparelhamento:
   razao: 2
+  algoritmo: otimo            # por rondas (1.º controlo para todos, depois o 2.º, depois suplentes), atribuição ótima; "guloso" = v0.6
   suplentes_por_caso: 1
   casos_sem_controlo: excluir
   etapas:

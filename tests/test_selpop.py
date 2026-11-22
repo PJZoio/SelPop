@@ -304,3 +304,54 @@ def test_stratified_example_end_to_end(tmp_path):
     write_many(Rs, labs, tmp_path / "x.xlsx")
     from openpyxl import load_workbook
     assert "EX-hta1_Publicacao" in load_workbook(tmp_path / "x.xlsx").sheetnames
+
+
+def test_rounds_matching_gives_everyone_one_first():
+    """Por rondas: com controlos escassos, todos os casos emparelháveis recebem 1 controlo antes de alguém receber 2."""
+    import numpy as np
+    from selpop.match import match
+    cases = pd.DataFrame({"id": [1, 2, 3], "x": [0.0, 0.1, 0.2]})
+    controls = pd.DataFrame({"id": [10, 11, 12], "x": [0.05, 0.06, 0.07]})
+    spec = {"razao": 2, "suplentes_por_caso": 0, "etapas": [{"calibre": {"x": 1.0}}]}
+    old = match(cases, controls, {**spec, "algoritmo": "guloso"}, "id", np.random.default_rng(1))
+    new = match(cases, controls, spec, "id", np.random.default_rng(1))
+    assert old.caso_id.nunique() < 3                        # o guloso global deixa um caso sem controlo
+    assert new.caso_id.nunique() == 3 and new.controlo_id.is_unique
+    assert (new[new.ordem == 1].caso_id.nunique()) == 3
+
+
+def test_optimal_maximises_matched_cases():
+    """Atribuição ótima: prefere emparelhar os dois casos a dar o controlo mais próximo a um só."""
+    import numpy as np
+    from selpop.match import match
+    cases = pd.DataFrame({"id": [1, 2], "x": [0.0, 1.0]})
+    controls = pd.DataFrame({"id": [10, 11], "x": [0.5, -0.9]})   # 10 serve ambos (e é o melhor para 2); 11 só serve 1
+    spec = {"razao": 1, "etapas": [{"calibre": {"x": 1.0}}]}
+    g = match(cases, controls, {**spec, "algoritmo": "rondas"}, "id", np.random.default_rng(0))
+    o = match(cases, controls, spec, "id", np.random.default_rng(0))
+    assert o.caso_id.nunique() == 2 and set(o.controlo_id) == {10, 11}
+    assert g.caso_id.nunique() <= 2
+
+
+def test_trace_sheet_matches_funnel():
+    from pathlib import Path
+    from selpop.consolidar import run_many
+    from selpop.rastreio import trace_frame
+    p = Path(__file__).resolve().parents[1] / "estudos" / "exemplo_generico.yaml"
+    R = run_many([p], log=lambda *a: None)[0]
+    T, D = trace_frame([R], ["EX"])
+    assert len(T) == len(R["df"]) and set(D.Coluna) >= set(T.columns)
+    assert (T["EX casos"] == "CASO SELECIONADO (dia-índice)").sum() == len(R["sel_cases"])
+    assert T["EX controlos"].str.startswith("CONTROLO PRINCIPAL").sum() == len(R["sel_ctrl"])
+    last = R["funil"][R["funil"].Passo.str.startswith("[")].groupby("Grupo").tail(1)["Dias/amostras"].tolist()
+    assert [(~T[c].str.startswith("excluído") & ~T[c].str.startswith("removido")).sum() for c in ("EX casos", "EX controlos")] == last
+
+
+def test_forced_rebalance_iteration():
+    from pathlib import Path
+    from selpop.pipeline import load_config, run
+    p = Path(__file__).resolve().parents[1] / "estudos" / "exemplo_generico.yaml"
+    cfg = load_config(p)
+    cfg["emparelhamento"]["reequilibrar"]["iteracao"] = 0
+    R = run(cfg, p.parent, log=lambda *a: None)
+    assert R["iters"].loc[R["iters"].Escolhida == "Sim", "Iteração"].tolist() == [0]

@@ -17,6 +17,7 @@ from openpyxl.styles import Font, PatternFill
 
 from .io import load
 from .estratos import expand, with_strata
+from .rastreio import write_trace
 from .pipeline import load_config, prep_key_of, prepare, select
 from .report import FILL_IN, FLAG, METODOS, F, _sel_rows, _style
 
@@ -168,7 +169,7 @@ def write_many(Rs, labels, out_path: Path, intro: list[tuple[str, str]] | None =
     for p in meta["proveniencia"]:
         leia.append(("Ficheiro de entrada", f"{p['ficheiro']} [{p['linhas']} linhas] SHA-256 {p['sha256'][:16]}… {p.get('nota', '')}"))
     leia.append(("Folhas", "Resumo · Variaveis (papel de cada variável em cada modelo) · Pedido_biobanco (amostras únicas, "
-                           "por prioridade) · Qualidade_dados · por modelo: Mx_Funil, Mx_Comparacao, Mx_Publicacao (pronta para o artigo), Mx_Selecao, Mx_Suplentes, Mx_Config"))
+                           "por prioridade) · Qualidade_dados · Rastreabilidade (todas as linhas da base, com as colunas dos cálculos e o destino de cada linha em cada modelo; significado das colunas em Rastreabilidade_colunas) · por modelo: Mx_Funil, Mx_Comparacao, Mx_Publicacao (pronta para o artigo), Mx_Selecao, Mx_Suplentes, Mx_Iteracoes (reequilíbrio: todas as tentativas e a escolhida), Mx_Config"))
     leia.append(("Papéis das variáveis", "Confundidor: deve estar equilibrado entre grupos (conta para o reequilíbrio). "
                                          "Preditor candidato: testado mas NÃO emparelhado — emparelhar anularia o sinal a estudar. "
                                          "Interferente analítico: pode alterar o espetro NIR (hemólise, bilirrubina, lesão muscular); monitorizar. "
@@ -183,12 +184,15 @@ def write_many(Rs, labels, out_path: Path, intro: list[tuple[str, str]] | None =
             V.to_excel(xw, sheet_name="Variaveis", index=False)
             P.to_excel(xw, sheet_name="Pedido_biobanco", index=False)
             Rs[0]["qc"].to_excel(xw, sheet_name="Qualidade_dados", index=False)
+            write_trace(xw, Rs, labels)
             for lab, R in zip(labels, Rs):
                 R["funil"].to_excel(xw, sheet_name=f"{lab}_Funil", index=False)
                 R["t_after"].to_excel(xw, sheet_name=f"{lab}_Comparacao", index=False, startrow=2)
                 _sel_rows(R, "principal").to_excel(xw, sheet_name=f"{lab}_Selecao", index=False)
                 sup = _sel_rows(R, "suplente")
                 (sup if len(sup) else pd.DataFrame({"Nota": ["Sem suplentes"]})).to_excel(xw, sheet_name=f"{lab}_Suplentes", index=False)
+                if len(R["iters"]):
+                    R["iters"].to_excel(xw, sheet_name=f"{lab}_Iteracoes", index=False)
                 pd.DataFrame({"Configuração (YAML)": yaml.safe_dump(R["cfg"], allow_unicode=True, sort_keys=False).splitlines()}) \
                     .to_excel(xw, sheet_name=f"{lab}_Config", index=False)
 
@@ -263,11 +267,18 @@ def main(argv=None):
     ap.add_argument("--publicacao", action="store_true", help="gravar também a tabela de características de cada modelo em Word (.docx)")
     ap.add_argument("--sav", action="store_true", help="gravar também os dados de cada modelo em SPSS (.sav) + sintaxe de validação (.sps)")
     ap.add_argument("--estratificar", metavar="COLUNA", help="repetir a seleção dentro de cada estrato desta coluna (ex.: COVID)")
+    ap.add_argument("--manter", nargs="+", metavar="ROTULO", help="guardar só estes grupos (ex.: M1-COVpos M2-COVpos M2-COVneg M3)")
     a = ap.parse_args(argv)
     paths = [Path(c).resolve() for c in a.configs]
     labels = a.rotulos or [f"M{i + 1}" for i in range(len(paths))]
     Rs = run_many(paths, estratificar=a.estratificar)
     labels = labels_for(Rs, labels)
+    if a.manter:
+        falta = set(a.manter) - set(labels)
+        if falta:
+            raise SystemExit(f"--manter: rótulos inexistentes {sorted(falta)}; disponíveis: {labels}")
+        keep = [i for i, lab in enumerate(labels) if lab in a.manter]
+        Rs, labels = [Rs[i] for i in keep], [labels[i] for i in keep]
     info = write_many(Rs, labels, Path(a.saida), pub_lang=a.lingua)
     out_dir = Path(a.saida).parent
     from .publish import write_docx, write_sav, write_sps
