@@ -355,3 +355,32 @@ def test_forced_rebalance_iteration():
     cfg["emparelhamento"]["reequilibrar"]["iteracao"] = 0
     R = run(cfg, p.parent, log=lambda *a: None)
     assert R["iters"].loc[R["iters"].Escolhida == "Sim", "Iteração"].tolist() == [0]
+
+
+def test_trace_formulas_match_python(tmp_path):
+    """As fórmulas da folha Rastreabilidade, recalculadas pelo LibreOffice, dão os mesmos valores que o Python."""
+    import shutil
+    import subprocess
+    from pathlib import Path
+    from selpop.consolidar import run_many, write_many
+    from selpop.rastreio import _formulas, trace_frame
+    p = Path(__file__).resolve().parents[1] / "estudos" / "exemplo_generico.yaml"
+    R = run_many([p], log=lambda *a: None)[0]
+    T, _ = trace_frame([R], ["EX"])
+    F = _formulas(R["cfg"], list(T.columns), len(T))
+    assert {"cr_min_dia", "tfge_dia"} <= set(F) and "amostra" not in F       # 'amostra' é também o nome da coluna de dados
+    out = tmp_path / "x.xlsx"
+    write_many([R], ["EX"], out)
+    from openpyxl import load_workbook
+    ws = load_workbook(out)["Rastreabilidade"]
+    hdr = [c.value for c in ws[1]]
+    assert str(ws.cell(2, hdr.index("tfge_dia") + 1).value).startswith("=")
+    soffice = shutil.which("soffice")
+    if not soffice:
+        pytest.skip("LibreOffice não disponível para recalcular")
+    subprocess.run([soffice, "--headless", "--calc", "--convert-to", "xlsx", "--outdir", str(tmp_path / "c"), str(out)],
+                   check=True, capture_output=True, timeout=300)
+    X = pd.read_excel(tmp_path / "c" / "x.xlsx", "Rastreabilidade")
+    for col in F:
+        a, b = pd.to_numeric(T[col], errors="coerce"), pd.to_numeric(X[col], errors="coerce")
+        assert (((a - b).abs() < 1e-6) | (a.isna() & b.isna())).all(), col
